@@ -1,0 +1,29 @@
+# ── Core web framework ────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.7.0
+python-dotenv>=1.0.1
+
+# ── HTTP client — used for Groq API AND Gmail REST API calls ─────────────────
+# (No google-api-python-client needed — Firebase Auth token is used directly)
+httpx>=0.27.0
+
+# ── Firebase Admin SDK (Firestore persistence) ────────────────────────────────
+# Falls back to in-memory store if firebase_credentials.json is not present
+firebase-admin>=6.5.0
+
+# ── Module 4: Resume upload & PDF parsing ────────────────────────────────────
+# python-multipart is required by FastAPI to handle multipart/form-data uploads
+python-multipart>=0.0.9
+# PyMuPDF: primary PDF text extractor (fast, no external dependencies)
+pymupdf>=1.24.0
+# pdfplumber: fallback PDF text extractor (graceful degradation if PyMuPDF absent)
+pdfplumber>=0.11.0
+
+# ── Module 2: Voice Mock Interview System ─────────────────────────────────────
+# HTML scraping for interview question harvesting
+beautifulsoup4>=4.12.3
+
+# ── Module 4-B: Resume-Based Auto Apply Engine ────────────────────────────────
+# DOCX resume file parsing (replaces mammoth from the original Node backend_4)
+python-docx>=1.1.0
