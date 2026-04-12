@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# In-memory cache for classification to save tokens/latency
+# ─────────────────────────────────────────────────────────────────────────────
+_classification_cache: dict[str, CompanyProfile] = {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Step 1 — Normalisation
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -121,6 +127,13 @@ async def classify_company_tier(raw_name: str) -> CompanyProfile:
     """
     normalized = normalize_company_name(raw_name)
 
+    # ── Cache check ────────────────────────────────────────────────────────
+    if normalized in _classification_cache:
+        logger.debug("Classification cache hit for '%s'", normalized)
+        # Update raw_name to match current request before returning
+        cached = _classification_cache[normalized]
+        return CompanyProfile(**{**cached.model_dump(), "raw_name": raw_name})
+
     # ── Groq path ──────────────────────────────────────────────────────────
     groq_result = await groq_service.classify_company_with_groq(normalized)
     if groq_result and isinstance(groq_result, dict) and "tier" in groq_result:
@@ -131,13 +144,15 @@ async def classify_company_tier(raw_name: str) -> CompanyProfile:
         except ValueError:
             tier = CompanyTier.Unknown
 
-        return CompanyProfile(
+        profile = CompanyProfile(
             raw_name=raw_name,
             normalized_name=normalized,
             tier=tier,
             tier_reason=groq_result.get("reason", "Classified by Groq."),
             source="groq",
         )
+        _classification_cache[normalized] = profile
+        return profile
 
     # ── Heuristic fallback ─────────────────────────────────────────────────
     logger.warning(

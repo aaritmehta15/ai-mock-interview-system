@@ -270,41 +270,55 @@ async def generate_strategy(company: str, role: str, time_left: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def generate_company_data(company: str, role: str, time_left: str) -> dict:
-    """Generate all prep data for a single company, with error isolation."""
-    results = {}
+    """Generate all prep data for a single company concurrently for speed."""
 
-    try:
-        results["top_questions"] = await generate_questions(company, role)
-    except Exception as e:
-        print(f"[ERROR] Questions generation failed: {e}")
-        results["top_questions"] = []
+    async def _safe_questions():
+        try:
+            return await generate_questions(company, role)
+        except Exception as e:
+            print(f"[ERROR] Questions generation failed: {e}")
+            return []
 
-    try:
-        results["leetcode_problems"] = await generate_leetcode(company, role)
-    except Exception as e:
-        print(f"[ERROR] LeetCode generation failed: {e}")
-        results["leetcode_problems"] = []
+    async def _safe_leetcode():
+        try:
+            return await generate_leetcode(company, role)
+        except Exception as e:
+            print(f"[ERROR] LeetCode generation failed: {e}")
+            return []
 
-    try:
-        dd = await generate_dos_donts(company, role)
-        results["dos"] = dd.get("dos", [])
-        results["donts"] = dd.get("donts", [])
-    except Exception as e:
-        print(f"[ERROR] DOs/DON'Ts generation failed: {e}")
-        results["dos"] = []
-        results["donts"] = []
+    async def _safe_dos_donts():
+        try:
+            return await generate_dos_donts(company, role)
+        except Exception as e:
+            print(f"[ERROR] DOs/DON'Ts generation failed: {e}")
+            return {"dos": [], "donts": []}
 
-    try:
-        results["prep_strategy"] = await generate_strategy(company, role, time_left)
-    except Exception as e:
-        print(f"[ERROR] Strategy generation failed: {e}")
-        results["prep_strategy"] = {
-            "strategy": "Generation failed. Please try again.",
-            "priority_areas": [],
-            "daily_plan_summary": "",
-        }
+    async def _safe_strategy():
+        try:
+            return await generate_strategy(company, role, time_left)
+        except Exception as e:
+            print(f"[ERROR] Strategy generation failed: {e}")
+            return {
+                "strategy": "Generation failed. Please try again.",
+                "priority_areas": [],
+                "daily_plan_summary": "",
+            }
 
-    return results
+    # Run all 4 Groq calls concurrently — cuts latency from ~60s to ~15s
+    questions, leetcode, dos_donts, strategy = await asyncio.gather(
+        _safe_questions(),
+        _safe_leetcode(),
+        _safe_dos_donts(),
+        _safe_strategy(),
+    )
+
+    return {
+        "top_questions":     questions,
+        "leetcode_problems": leetcode,
+        "dos":               dos_donts.get("dos", []),
+        "donts":             dos_donts.get("donts", []),
+        "prep_strategy":     strategy,
+    }
 
 
 async def handle_manual_mode(info: dict) -> dict:

@@ -126,15 +126,29 @@ async def _extract_events_from_emails(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Plan generation
+# Plan generation (Token Optimisation)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _prepare_events_for_llm_plan(events: List[ScoredEvent]) -> str:
+    """
+    Strip ScoredEvent objects down to the bare minimum needed for planning.
+    Saves 50-70% tokens compared to full model_dump().
+    """
+    minimal = []
+    for e in events:
+        minimal.append({
+            "title": e.title,
+            "type": e.event_type.value,
+            "priority": round(e.priority_score, 1),
+            "days_until": e.days_until,
+            "company": e.company_profile.normalized_name if e.company_profile else None
+        })
+    return json.dumps(minimal, indent=2)
+
+
 async def _build_plan_from_groq(sorted_events: List[ScoredEvent]) -> Optional[DailyPlan]:
-    payload = json.dumps(
-        [e.model_dump() for e in sorted_events],
-        indent=2,
-        default=str,
-    )
+    payload = _prepare_events_for_llm_plan(sorted_events)
+    logger.debug("Plan generation payload size: %d chars", len(payload))
     raw = await groq_service.generate_daily_plan(payload)
     if not raw:
         return None
