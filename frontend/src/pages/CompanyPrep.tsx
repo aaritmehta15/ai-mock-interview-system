@@ -120,7 +120,7 @@ function PrepPack({ data }: { data: any }) {
 }
 
 export default function CompanyPrep() {
-  const { accessToken } = useAuth();
+  const { accessToken, signInWithGoogle } = useAuth();
   const [text,    setText]     = useState('');
   const [result,  setResult]   = useState<any>(null);
   const [loading, setLoading]  = useState(false);
@@ -136,10 +136,24 @@ export default function CompanyPrep() {
   };
 
   const handleGmailScan = async () => {
-    if (!accessToken) { setError('No Gmail access token. Please sign out and sign in again.'); return; }
     setLoading(true); setError(''); setResult(null);
-    try { setResult(await gmailScan(accessToken)); }
-    catch (e: any) { setError(e.response?.data?.detail || e.message); }
+    try {
+      // If no token, trigger the OAuth popup first
+      if (!accessToken) {
+        await signInWithGoogle();
+      }
+      
+      // Gmail Scan — Unified Gateway approach
+      const res = await gmailScan();
+      setResult(res);
+    }
+    catch (e: any) {
+      const msg = e.response?.data?.detail || e.message;
+      setError(msg);
+      if (e.response?.status === 403 || e.response?.status === 401) {
+        setError('Gmail access denied or expired. Please click the button below to grant permission.');
+      }
+    }
     finally { setLoading(false); }
   };
 
@@ -185,12 +199,25 @@ export default function CompanyPrep() {
               <p style={{ fontSize:13, color:'var(--text-2)' }}>Searches last 60 days for placement/interview emails, extracts all companies, and generates prep packs for each.</p>
             </div>
           </div>
-          {!accessToken && <div style={{ padding:'10px 14px', background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:8, fontSize:13, color:'var(--amber)', marginBottom:16 }}>Sign out and sign in again to grant Gmail permission.</div>}
-          <button onClick={handleGmailScan} disabled={loading || !accessToken} className="btn btn-primary" style={{ gap:8 }}>
-            {loading ? <><Loader2 size={15} style={{ animation:'spin 1s linear infinite' }} />Scanning Gmail…</> : <><Mail size={15} />Scan Gmail</>}
+          
+          <button onClick={handleGmailScan} disabled={loading} className="btn btn-primary" style={{ gap:8 }}>
+            {loading ? (
+              <><Loader2 size={15} style={{ animation:'spin 1s linear infinite' }} />Syncing Gmail…</>
+            ) : !accessToken ? (
+              <><Mail size={15} />Connect Gmail Account</>
+            ) : (
+              <><Mail size={15} />Scan Gmail</>
+            )}
           </button>
+          
+          {accessToken && (
+             <p style={{ fontSize:11, color:'var(--text-3)', marginTop:12, textAlign:'center' }}>
+               Using connected account. <span style={{ color:'var(--cyan)', cursor:'pointer', textDecoration:'underline' }} onClick={() => signInWithGoogle()}>Switch account?</span>
+             </p>
+          )}
         </motion.div>
       )}
+
 
       {error && <div style={{ padding:'12px 16px', background:'rgba(244,63,94,0.1)', border:'1px solid rgba(244,63,94,0.25)', borderRadius:10, fontSize:13, color:'var(--rose)', marginBottom:16 }}>{error}</div>}
 

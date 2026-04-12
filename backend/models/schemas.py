@@ -49,10 +49,23 @@ class CompanyProfile(BaseModel):
 
 class StudentProfile(BaseModel):
     user_id: str
-    target_companies: list[str] = Field(default_factory=list)
-    preferred_roles: list[str]  = Field(default_factory=list)
+    name: Optional[str] = None
+    email: Optional[str] = None
+    photoURL: Optional[str] = None
+    branch: Optional[str] = None
+    year: Optional[str] = None
+    cgpa: Optional[float] = None
+    targetCompanies: list[str] = Field(default_factory=list, alias="target_companies")
+    skills: list[str] = Field(default_factory=list)
+    preferredRoles: list[str] = Field(default_factory=list, alias="preferred_roles")
     # "high_package" | "learning" | "stability"
-    priority_bias: str = "high_package"
+    priorityBias: str = Field(default="high_package", alias="priority_bias")
+    updatedAt: Optional[str] = None
+
+    model_config = {
+        "populate_by_name": True,
+        "extra": "allow"
+    }
 
 
 # ── Extracted structured event ─────────────────────────────────────────────────
@@ -129,16 +142,29 @@ class LogStudyResponse(BaseModel):
 # ── Student profile update request ────────────────────────────────────────────
 
 class UpdateProfileRequest(BaseModel):
-    target_companies: list[str]  = Field(default_factory=list)
-    preferred_roles: list[str]   = Field(default_factory=list)
-    priority_bias: str           = "high_package"
+    name: Optional[str] = None
+    email: Optional[str] = None
+    photoURL: Optional[str] = None
+    branch: Optional[str] = None
+    year: Optional[str] = None
+    cgpa: Optional[float] = None
+    targetCompanies: list[str]  = Field(default_factory=list, alias="target_companies")
+    skills: list[str]            = Field(default_factory=list)
+    preferredRoles: list[str]   = Field(default_factory=list, alias="preferred_roles")
+    priorityBias: str           = Field(default="high_package", alias="priority_bias")
+    updatedAt: Optional[str]     = None
 
-    @field_validator("priority_bias")
+    model_config = {
+        "populate_by_name": True,
+        "extra": "allow"
+    }
+
+    @field_validator("priorityBias", mode="before")
     @classmethod
     def validate_bias(cls, v: str) -> str:
         allowed = {"high_package", "learning", "stability"}
         if v not in allowed:
-            raise ValueError(f"priority_bias must be one of {allowed}")
+            raise ValueError(f"priorityBias must be one of {allowed}")
         return v
 
 
@@ -179,3 +205,25 @@ class ApplyLinksResponse(BaseModel):
     user_id: str
     links: list[ApplyLink]
     total: int
+
+
+# ── Module 7: Autonomous Mission Control ──────────────────────────────────────
+
+class ApplicationStatus(BaseModel):
+    id: str
+    company: str
+    status: str  # applied | assessment | interview | offer | rejected
+    last_updated: str
+    email_id: Optional[str] = None
+
+class PerformanceMetric(BaseModel):
+    date: str
+    interview_score: Optional[int] = None
+    study_hours: Optional[float] = None
+
+class MissionControlSummary(BaseModel):
+    user_id: str
+    applications: list[ApplicationStatus] = Field(default_factory=list)
+    performance_history: list[PerformanceMetric] = Field(default_factory=list)
+    urgency_level: str = "low"  # low | high
+    action_cta: str = ""

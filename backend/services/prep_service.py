@@ -364,145 +364,97 @@ async def handle_email_mode(info: dict) -> dict:
 # Gmail helpers  (exact copy from main_3.py)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def decode_email_body(payload: dict) -> str:
-    """Recursively extract plain text body from Gmail message payload."""
-    # Direct body
-    if payload.get("mimeType", "").startswith("text/plain"):
-        data = payload.get("body", {}).get("data", "")
-        if data:
-            return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-
-    # Multipart: recurse into parts
-    parts = payload.get("parts", [])
-    for part in parts:
-        if part.get("mimeType", "").startswith("text/plain"):
-            data = part.get("body", {}).get("data", "")
-            if data:
-                return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-
-    # Fallback: try text/html
-    for part in parts:
-        if part.get("mimeType", "").startswith("text/html"):
-            data = part.get("body", {}).get("data", "")
-            if data:
-                html = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-                return re.sub(r"<[^>]+>", " ", html).strip()
-
-    # Nested multipart
-    for part in parts:
-        if part.get("parts"):
-            result = decode_email_body(part)
-            if result:
-                return result
-
-    return ""
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Gmail helpers (Refactored to use shared gmail_service)
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def gmail_scan(access_token: str) -> dict:
     """
-    Full Gmail scan pipeline (mirrors main_3.gmail_scan endpoint handler):
-    1. Search for interview/placement emails
-    2. Fetch each email body
-    3. Extract companies via Groq
-    4. Generate prep data for each company
+    Full Gmail scan pipeline:
+    1. Search for interview/placement emails via shared gmail_service
+    2. Extract companies via Groq from retrieved emails
+    3. Generate prep data for each company
     """
-    headers = {"Authorization": f"Bearer {access_token}"}
+    from services.gmail_service import fetch_emails
 
-    print("[GMAIL] Searching for interview emails...")
+    print("[GMAIL] Starting intelligent scan...")
 
-    # Step 1: Search for matching emails
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            search_resp = await client.get(
-                f"{GMAIL_API}/messages",
-                headers=headers,
-                params={"q": GMAIL_SEARCH_QUERY, "maxResults": 10},
-            )
+        # Fetch up to 10 matching emails using shared service
+        emails = await fetch_emails(access_token, query=GMAIL_SEARCH_QUERY, max_results=10)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Gmail sync failed: {str(e)}")
 
-            if search_resp.status_code == 401:
-                raise HTTPException(status_code=401, detail="Gmail access expired. Please sign in again.")
-            if search_resp.status_code == 403:
-                raise HTTPException(status_code=403, detail="Gmail access denied. Please grant email read permission.")
+    if not emails:
+        return {
+            "mode": "gmail",
+            "companies": [],
+            "message": "No interview-related emails found in the last 60 days."
+        }
 
-            search_resp.raise_for_status()
-            search_data = search_resp.json()
+    print(f"[GMAIL] Found {len(emails)} matching emails. Analysing...")
 
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"Failed to reach Gmail API: {str(e)}")
+    # Step 2: Combine all emails for extraction
+    # We include sender and subject to help the LLM identify the company accurately
+    email_summaries = []
+    for e in emails:
+        # Include metadata + truncated body
+        summary = f"ID: {e.id}\nFrom: {e.sender}\nSubject: {e.subject}\nContent: {e.body[:2500]}"
+        email_summaries.append(summary)
 
-    message_ids = [m["id"] for m in search_data.get("messages", [])]
-    if not message_ids:
-        return {"mode": "gmail", "companies": [], "message": "No interview-related emails found in the last 60 days."}
+    combined = "\n\n---EMAIL SEPARATOR---\n\n".join(email_summaries)
 
-    print(f"[GMAIL] Found {len(message_ids)} matching emails")
-
-    # Step 2: Fetch each email body
-    email_bodies = []
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        for msg_id in message_ids[:10]:  # Cap at 10
-            try:
-                msg_resp = await client.get(
-                    f"{GMAIL_API}/messages/{msg_id}",
-                    headers=headers,
-                    params={"format": "full"},
-                )
-                if msg_resp.status_code != 200:
-                    continue
-                msg_data = msg_resp.json()
-
-                # Get subject from headers
-                subject = ""
-                msg_headers = msg_data.get("payload", {}).get("headers", [])
-                for h in msg_headers:
-                    if h.get("name", "").lower() == "subject":
-                        subject = h.get("value", "")
-                        break
-
-                body = decode_email_body(msg_data.get("payload", {}))
-                if body:
-                    full_text = f"Subject: {subject}\n\n{body}" if subject else body
-                    email_bodies.append(full_text[:3000])  # Cap each email
-
-            except Exception as e:
-                print(f"[GMAIL] Error fetching message {msg_id}: {e}")
-                continue
-
-    if not email_bodies:
-        return {"mode": "gmail", "companies": [], "message": "Found emails but couldn't read their content."}
-
-    print(f"[GMAIL] Successfully fetched {len(email_bodies)} email bodies")
-
-    # Step 3: Combine all emails and extract companies via LLM
-    combined = "\n\n---EMAIL SEPARATOR---\n\n".join(email_bodies)
-
+    # Step 3: Combined extraction via LLM
     extract_prompt = (
-        "Extract ALL unique companies mentioned in these interview/placement emails. "
-        "For each company, identify the role and any timeline mentioned. "
+        "You are an assistant extracting recruitment details from multiple emails. "
+        "Each email is separated by '---EMAIL SEPARATOR---'. "
+        "Extract ALL unique companies that have invited the user to an interview, "
+        "assessment, coding round, or sent an offer. "
+        "Ignore newsletters or general promotional mail. "
+        "For each found company, identify the role and estimated timeline (e.g. '2 weeks'). "
         "Return JSON:\n"
-        '{"companies": [{"company": "Name", "role": "Role or General", "time_left": "time or Not specified"}]}\n\n'
-        f"Emails:\n{combined[:8000]}"
+        '{"companies": [{"company": "Name", "role": "Role", "time_left": "time"}]}\n\n'
+        f"Emails:\n{combined[:8500]}"
     )
 
     raw = await _call_groq_prep(extract_prompt)
     info = parse_json_safe(raw)
 
     if not info or "companies" not in info:
-        info = {"companies": [{"company": "Unknown", "role": "Software Engineer", "time_left": "Not specified"}]}
+        # LLM might return nothing if no companies found after closer inspection
+        return {
+            "mode": "gmail",
+            "companies": [],
+            "message": "Found emails but couldn't identify specific interview invitations."
+        }
 
-    # Deduplicate companies by name
+    # Deduplicate companies by name (case-insensitive)
     seen: set[str] = set()
     unique_companies = []
     for c in info["companies"]:
-        name = c.get("company", "").strip().lower()
-        if name and name not in seen:
-            seen.add(name)
+        name = c.get("company", "").strip()
+        if not name: continue
+        key = name.lower()
+        if key not in seen:
+            seen.add(key)
             unique_companies.append(c)
 
-    info["companies"] = unique_companies
-    print(f"[GMAIL] Extracted {len(unique_companies)} unique companies: {[c['company'] for c in unique_companies]}")
-
     # Step 4: Generate prep data for each company
+    # PERFORMANCE OPTIMIZATION: Limit to top 3 companies during Gmail scan
+    # generating full prep packs is LLM-intensive (4 calls per company).
+    original_count = len(unique_companies)
+    if original_count > 3:
+        print(f"[GMAIL] Capping results to top 3 (out of {original_count}) to prevent timeout.")
+        info["companies"] = unique_companies[:3]
+
     result = await handle_email_mode(info)
     result["mode"] = "gmail"
-    result["emails_scanned"] = len(email_bodies)
+    result["emails_scanned"] = len(emails)
+    
+    if original_count > 3:
+        result["message"] = f"Found {original_count} companies. Showing prep packs for the top 3 to keep it fast. Analyze others manually above!"
+    
     return result
+

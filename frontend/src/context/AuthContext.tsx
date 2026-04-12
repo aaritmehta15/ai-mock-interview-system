@@ -22,11 +22,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
-        const idToken = await u.getIdToken();
-        setAuthToken(idToken);
-        // Store Google OAuth access token (needed for Gmail)
-        const stored = sessionStorage.getItem('google_access_token');
-        if (stored) setAccessToken(stored);
+        // Unify Gateway: Use Google OAuth token for ALL backend requests
+        // as requested ("simple Firebase login gateway").
+        const oauthToken = sessionStorage.getItem('google_access_token');
+        if (oauthToken) {
+          setAccessToken(oauthToken);
+          setAuthToken(oauthToken); // Global Authorization: Bearer <google_token>
+        } else {
+          // Fallback to ID token if Google token not yet available
+          const idToken = await u.getIdToken();
+          setAuthToken(idToken);
+        }
       } else {
         clearAuthToken();
         setAccessToken(null);
@@ -36,14 +42,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signInWithGoogle = React.useCallback(async () => {
-    const result = await signInWithPopup(auth, googleProvider);
     try {
+      const result = await signInWithPopup(auth, googleProvider);
       const oauthToken = (result as any)._tokenResponse?.oauthAccessToken;
       if (oauthToken) {
         sessionStorage.setItem('google_access_token', oauthToken);
         setAccessToken(oauthToken);
+        setAuthToken(oauthToken); // Update header immediately
       }
-    } catch {}
+    } catch (e) {
+      console.error("Sign in error:", e);
+    }
   }, []);
 
   const logout = React.useCallback(async () => {

@@ -132,6 +132,7 @@ textarea.input { resize: vertical; min-height: 120px; }
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.animate-spin { animation: spin 1s linear infinite; }
 
 /* ── Gradient text ───────────────────────────────────────────────────────────── */
 .gradient-text {

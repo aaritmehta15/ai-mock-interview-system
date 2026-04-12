@@ -201,9 +201,9 @@ def evaluate_company_priority(
         )
 
     # ── Student target match bonus ─────────────────────────────────────────
-    if student_profile and student_profile.target_companies:
+    if student_profile and student_profile.targetCompanies:
         norm_lower = company_profile.normalized_name.lower()
-        for target in student_profile.target_companies:
+        for target in student_profile.targetCompanies:
             if target.lower() in norm_lower or norm_lower in target.lower():
                 bonus += STUDENT_TARGET_MATCH_BONUS
                 logger.debug(

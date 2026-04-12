@@ -8,6 +8,7 @@ import PriorityEngine from './pages/PriorityEngine';
 import Interview from './pages/Interview';
 import CompanyPrep from './pages/CompanyPrep';
 import AutoApply from './pages/AutoApply';
+import MissionControl from './pages/MissionControl';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/interview" element={<Interview />} />
             <Route path="/prep"      element={<CompanyPrep />} />
             <Route path="/apply"     element={<AutoApply />} />
+            <Route path="/mission"   element={<MissionControl />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

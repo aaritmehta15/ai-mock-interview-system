@@ -63,12 +63,20 @@ def _auth_headers(access_token: str) -> dict:
     return {"Authorization": f"Bearer {access_token}"}
 
 
-async def _list_message_ids(client: httpx.AsyncClient, access_token: str) -> list[str]:
+async def _list_message_ids(
+    client: httpx.AsyncClient,
+    access_token: str,
+    query: Optional[str] = None,
+    max_results: Optional[int] = None,
+) -> list[str]:
     """Return a list of message IDs matching the placement query."""
+    target_query = query or _GMAIL_QUERY
+    target_max = max_results or GMAIL_MAX_RESULTS
+
     resp = await client.get(
         f"{_GMAIL_BASE}/messages",
         headers=_auth_headers(access_token),
-        params={"q": _GMAIL_QUERY, "maxResults": GMAIL_MAX_RESULTS},
+        params={"q": target_query, "maxResults": target_max},
         timeout=20.0,
     )
     if resp.status_code == 401:
@@ -134,13 +142,17 @@ async def _fetch_message(
         return None
 
 
-async def _fetch_real_emails(access_token: str) -> list[RawEmail]:
+async def _fetch_real_emails(
+    access_token: str,
+    query: Optional[str] = None,
+    max_results: Optional[int] = None,
+) -> list[RawEmail]:
     """
     Fetch real emails from Gmail using the provided OAuth access token.
     All message fetches run concurrently inside a single shared httpx client.
     """
     async with httpx.AsyncClient() as client:
-        msg_ids = await _list_message_ids(client, access_token)
+        msg_ids = await _list_message_ids(client, access_token, query=query, max_results=max_results)
         logger.info("Gmail returned %d message IDs.", len(msg_ids))
 
         tasks = [_fetch_message(client, access_token, mid) for mid in msg_ids]
@@ -151,152 +163,24 @@ async def _fetch_real_emails(access_token: str) -> list[RawEmail]:
     return emails
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Dynamic mock corpus (fallback — dates always relative to today)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _rel(offset: int) -> str:
-    return (today_utc() + timedelta(days=offset)).isoformat()
-
-
-def _build_mock_emails() -> list[RawEmail]:
-    t = today_utc().isoformat()
-    return [
-        RawEmail(
-            id="mock_001",
-            subject="Amazon SDE Campus Drive – Register Now",
-            sender="placements@college.edu",
-            received_at=f"{t}T08:00:00Z",
-            body=(
-                f"Dear Student,\nAmazon is conducting an on-campus SDE placement drive "
-                f"on {_rel(2)}. Online assessment + 3 interview rounds. "
-                f"Registration deadline: {_rel(1)}.\nPlacement Cell"
-            ),
-        ),
-        RawEmail(
-            id="mock_002",
-            subject="URGENT: TCS NQT – Aptitude Test Tomorrow",
-            sender="noreply@tcs-careers.com",
-            received_at=f"{t}T09:30:00Z",
-            body=(
-                f"Your TCS National Qualifier Test (NQT) is on {_rel(1)} at 10:00 AM. "
-                f"Covers Quantitative Aptitude, Reasoning, and Coding. Duration: 3 hrs."
-            ),
-        ),
-        RawEmail(
-            id="mock_003",
-            subject="End-Semester Exam Timetable Released",
-            sender="exams@college.edu",
-            received_at=f"{t}T07:00:00Z",
-            body=(
-                f"Data Structures & Algorithms – {_rel(5)} – 9:00 AM – 100 marks\n"
-                f"Operating Systems – {_rel(7)} – 2:00 PM – 100 marks\n"
-                f"Computer Networks – {_rel(9)} – 9:00 AM – 100 marks"
-            ),
-        ),
-        RawEmail(
-            id="mock_004",
-            subject="Google STEP Internship – Application Deadline Reminder",
-            sender="internships@google.com",
-            received_at=f"{t}T06:00:00Z",
-            body=(
-                f"Google STEP Internship application deadline: {_rel(3)} at 11:59 PM PST. "
-                f"Upload resume, transcripts, and cover letter."
-            ),
-        ),
-        RawEmail(
-            id="mock_005",
-            subject="OS Lab Assignment – Due Soon",
-            sender="os.lab@college.edu",
-            received_at=f"{t}T10:00:00Z",
-            body=(
-                f"OS Lab Assignment on Process Scheduling is due {_rel(4)}. "
-                f"Submit via LMS. Total marks: 20."
-            ),
-        ),
-        RawEmail(
-            id="mock_006",
-            subject="Microsoft Internship Drive – Summer 2026",
-            sender="placements@college.edu",
-            received_at=f"{t}T11:00:00Z",
-            body=(
-                f"Microsoft internship drive on {_rel(6)}. SDE role, CGPA >= 7.5. "
-                f"Register by {_rel(4)}."
-            ),
-        ),
-        RawEmail(
-            id="mock_007",
-            subject="Weekly Quiz – Data Science – 15 Marks",
-            sender="ds.course@college.edu",
-            received_at=f"{t}T08:30:00Z",
-            body=(
-                f"ML Basics quiz on {_rel(1)} at 3:00 PM, Room 204. "
-                f"15 marks. Topics: Linear Regression, Gradient Descent."
-            ),
-        ),
-        RawEmail(
-            id="mock_008",
-            subject="Flipkart GRiD 6.0 – Registration Open",
-            sender="grid@flipkart.com",
-            received_at=f"{t}T10:30:00Z",
-            body=(
-                f"Flipkart GRiD 6.0 – Software Development Track. "
-                f"Register before {_rel(5)}. Online round: {_rel(10)}. Teams of 2."
-            ),
-        ),
-        RawEmail(
-            id="mock_009",
-            subject="Razorpay Off-Campus Drive – Apply Now",
-            sender="careers@razorpay.com",
-            received_at=f"{t}T09:00:00Z",
-            body=(
-                f"Razorpay is hiring 2026 grads for SWE roles. "
-                f"Online assessment: {_rel(8)}. Deadline: {_rel(6)}."
-            ),
-        ),
-        RawEmail(
-            id="mock_010",
-            subject="Internal Assessment – Computer Networks – 30 Marks",
-            sender="cn.faculty@college.edu",
-            received_at=f"{t}T07:45:00Z",
-            body=(
-                f"CN Internal Assessment (Unit 3 & 4) on {_rel(3)} at 11:00 AM. "
-                f"30 marks. Syllabus: Network, Transport, and Application layers."
-            ),
-        ),
-    ]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Public async API
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def fetch_emails(google_access_token: Optional[str] = None) -> list[RawEmail]:
+async def fetch_emails(
+    google_access_token: Optional[str],
+    query: Optional[str] = None,
+    max_results: Optional[int] = None,
+) -> list[RawEmail]:
     """
-    Fetch emails.
-
-    Args:
-        google_access_token: The Google OAuth access token obtained from
-            Firebase Auth on the frontend after Google Sign-In.
-            If None or empty, falls back to the dynamic mock corpus.
-
-    Returns:
-        List of RawEmail objects ready for Groq extraction.
+    Public entry point to fetch emails from Gmail.
+    If google_access_token is missing, returns an empty list.
     """
-    if google_access_token:
-        try:
-            return await _fetch_real_emails(google_access_token)
-        except PermissionError as exc:
-            # Scope / auth problem — log clearly, fall through to mock
-            logger.error("Gmail auth error: %s", exc)
-        except httpx.HTTPStatusError as exc:
-            logger.error("Gmail API HTTP error %s — falling back to mock.", exc.response.status_code)
-        except Exception as exc:
-            logger.error("Gmail API unexpected error: %s — falling back to mock.", exc)
+    if not google_access_token:
+        logger.info("No valid Google access token provided — returning EMPTY email list.")
+        return []
 
-    logger.warning(
-        "No valid Google access token provided — using MOCK email corpus. "
-        "Pass the Firebase Auth Google access token as 'Authorization: Bearer <token>'."
-    )
-    await asyncio.sleep(0.02)   # simulate I/O latency
-    return _build_mock_emails()
+    try:
+        return await _fetch_real_emails(google_access_token, query=query, max_results=max_results)
+    except PermissionError:
+        raise
+    except Exception as e:
+        logger.error("Error fetching emails: %s", e)
+        return []
+

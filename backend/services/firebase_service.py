@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
@@ -38,6 +39,23 @@ def _mem_set(key: str, data: dict) -> None:
 
 def _mem_get(key: str) -> Optional[dict]:
     return _mem.get(key)
+
+
+def _sanitize_data(data: Any) -> Any:
+    """
+    Recursively converts Firestore-native objects (datetime, Timestamp)
+    to JSON-friendly formats (ISO strings).
+    """
+    if isinstance(data, dict):
+        return {k: _sanitize_data(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_sanitize_data(v) for v in data]
+    elif isinstance(data, datetime.datetime):
+        return data.isoformat()
+    # Check for google.cloud.firestore.Timestamp if possible, but isoformat() covers standard SDK
+    elif hasattr(data, "isoformat"):
+        return data.isoformat()
+    return data
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -134,7 +152,8 @@ async def get_student_profile(user_id: str) -> Optional[dict]:
         def _r():
             doc = _db.document(key).get()
             return doc.to_dict() if doc.exists else None
-        return await _run(_r)
+        raw = await _run(_r)
+        return _sanitize_data(raw) if raw else None
     except Exception as exc:
         logger.warning("Firestore get_student_profile failed (%s) — using in-memory.", exc)
         return _mem_get(key)
@@ -179,7 +198,7 @@ async def get_study_hours(user_id: str, date: str) -> Optional[float]:
             doc = _db.document(key).get()
             return doc.to_dict().get("hours_studied") if doc.exists else None
         result = await _run(_r)
-        return result
+        return _sanitize_data(result)
     except Exception as exc:
         logger.warning("Firestore get_study_hours failed (%s) — using in-memory.", exc)
         doc = _mem_get(key)
@@ -232,8 +251,77 @@ async def get_daily_plan(user_id: str, date: str) -> Optional[dict]:
         def _r():
             doc = _db.document(key).get()
             return doc.to_dict().get("plan") if doc.exists else None
-        return await _run(_r)
+        raw = await _run(_r)
+        return _sanitize_data(raw) if raw else None
     except Exception as exc:
         logger.warning("Firestore get_daily_plan failed (%s) — using in-memory.", exc)
         doc = _mem_get(key)
         return doc["plan"] if doc else None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mission Control — Applications
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def save_application(user_id: str, app: dict) -> None:
+    app_id = app.get("id") or app.get("company").lower().replace(" ", "_")
+    key = f"users/{user_id}/applications/{app_id}"
+    _mem_set(key, app)
+    if not _use_firestore():
+        return
+    try:
+        await _run(lambda: _db.document(key).set(app, merge=True))
+    except Exception as exc:
+        logger.warning("Firestore save_application failed (%s).", exc)
+
+
+async def get_applications(user_id: str) -> list[dict]:
+    path = f"users/{user_id}/applications"
+    if not _use_firestore():
+        return [v for k, v in _mem.items() if k.startswith(path)]
+    try:
+        def _r():
+            docs = _db.collection(path).stream()
+            return [doc.to_dict() for doc in docs]
+        raw = await _run(_r)
+        return _sanitize_data(raw)
+    except Exception as exc:
+        logger.warning("Firestore get_applications failed (%s).", exc)
+        return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mission Control — Performance History
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def log_performance_score(user_id: str, date: str, score: int) -> None:
+    key = f"users/{user_id}/performance_logs/{date}"
+    existing = _mem_get(key) or {}
+    existing["interview_score"] = score
+    existing["date"] = date
+    _mem_set(key, existing)
+    if not _use_firestore():
+        return
+    try:
+        await _run(lambda: _db.document(key).set({"interview_score": score, "date": date}, merge=True))
+    except Exception as exc:
+        logger.warning("Firestore log_performance_score failed (%s).", exc)
+
+
+async def get_performance_history(user_id: str, limit: int = 30) -> list[dict]:
+    path = f"users/{user_id}/performance_logs"
+    if not _use_firestore():
+        return sorted(
+            [v for k, v in _mem.items() if k.startswith(path)],
+            key=lambda x: x.get("date", ""),
+            reverse=True
+        )[:limit]
+    try:
+        def _r():
+            docs = _db.collection(path).order_by("date", direction="DESCENDING").limit(limit).stream()
+            return [doc.to_dict() for doc in docs]
+        raw = await _run(_r)
+        return _sanitize_data(raw)
+    except Exception as exc:
+        logger.warning("Firestore get_performance_history failed (%s).", exc)
+        return []

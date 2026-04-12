@@ -54,10 +54,14 @@ export default function PriorityEngine() {
   }, [activeTab, accessToken]);
 
   const handleGenerate = async () => {
-    if (!accessToken) { setError('No Gmail access token. Sign out and sign in again, granting Google Calendar & Gmail permissions.'); return; }
     setLoading(true); setError(''); setPlan(null);
-    try { const data = await generatePlan(accessToken); setPlan(data); }
-    catch (e: any) { setError(e.response?.data?.detail || e.message); }
+    try { 
+      const data = await generatePlan(); 
+      setPlan(data); 
+    }
+    catch (e: any) { 
+      setError(e.response?.data?.detail || e.message); 
+    }
     finally { setLoading(false); }
   };
 

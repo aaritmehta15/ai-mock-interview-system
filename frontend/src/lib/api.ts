@@ -13,17 +13,14 @@ export function clearAuthToken() {
 }
 
 // ── Module 1 — Smart Priority Engine ────────────────────────────────────────
-export const generatePlan = (accessToken: string) =>
-  api.get('/generate-plan', { headers: { Authorization: `Bearer ${accessToken}` } }).then(r => r.data);
+export const generatePlan = () =>
+  api.get('/generate-plan').then(r => r.data);
 
 export const logStudy = (payload: { userId: string; date: string; hours: number; subject?: string }) =>
   api.post('/log-study', payload).then(r => r.data);
 
 export const getProfile = (userId: string) =>
-  api.get(`/profile/${userId}`).then(r => r.data).catch(err => {
-    if (err.response?.status === 404) return null;
-    throw err;
-  });
+  api.get(`/profile/${userId}`).then(r => r.data);
 
 export const updateProfile = (userId: string, data: object) =>
   api.post(`/profile/${userId}`, data).then(r => r.data);
@@ -45,8 +42,8 @@ export const interviewSummary = (payload: object) =>
 export const analyzeCompany = (input_text: string) =>
   api.post('/api/analyze', { input_text }).then(r => r.data);
 
-export const gmailScan = (access_token: string) =>
-  api.post('/api/gmail-scan', { access_token }).then(r => r.data);
+export const gmailScan = () =>
+  api.post('/api/gmail-scan', {}).then(r => r.data);
 
 // ── Module 4 — Auto Apply Engine ────────────────────────────────────────────
 export const processResumeAll = (file: File, onProgress?: (p: number) => void) => {
@@ -78,6 +75,13 @@ export const getResumeGaps = (sessionId: string) =>
 
 export const getProjectSuggestions = (sessionId: string) =>
   api.post('/auto-apply/projects', { sessionId }).then(r => r.data);
+
+// ── Module 7 — Mission Control ───────────────────────────────────────────
+export const getMissionControlStatus = (userId: string) =>
+  api.get(`/mission-control/status/${userId}`).then(r => r.data);
+
+export const syncMissionControl = (userId: string) =>
+  api.post(`/mission-control/sync/${userId}`, {}).then(r => r.data);
 
 // ── Health ───────────────────────────────────────────────────────────────────
 export const health = () => api.get('/health').then(r => r.data);
@@ -146,6 +150,7 @@ export async function fetchIndianHolidays(accessToken: string): Promise<GCalEven
     _fetchCalendarEvents('en.indian#holiday@group.v.calendar.google.com', accessToken, 'holiday')
   );
 }
+
 
 /** Fetch Google Classroom coursework deadlines (Optimised Batching + Filter) */
 export async function fetchClassroomDeadlines(accessToken: string): Promise<GCalEvent[]> {

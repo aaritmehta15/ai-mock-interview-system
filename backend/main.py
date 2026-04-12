@@ -44,7 +44,7 @@ from models.schemas import (
     UpdateProfileRequest,
     UploadResumeResponse,
 )
-from services import apply_service, firebase_service, planner_service, resume_service, study_service
+from services import apply_service, firebase_service, planner_service, resume_service, study_service, mission_control_service
 
 # ─── Module 2: Voice Interview imports ───────────────────────────────────────
 from scraper import scrape_questions
@@ -280,26 +280,40 @@ async def log_study(body: LogStudyRequest) -> LogStudyResponse:
     "/profile/{user_id}",
     summary="Get student profile",
     tags=["Student Profile"],
-    response_model=StudentProfile,
+    response_model=Any,
 )
-async def get_profile(user_id: str) -> StudentProfile:
+async def get_profile(user_id: str) -> Optional[StudentProfile]:
     """
     Fetch the student profile from Firestore.
-    Profile drives the company-match bonus in the priority engine.
+    Returns None if no profile exists (prevents 404 console noise).
     """
-    raw = await firebase_service.get_student_profile(user_id)
-    if not raw:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                f"No profile for user_id='{user_id}'. "
-                "Create one via POST /profile/{user_id}."
-            ),
-        )
     try:
-        return StudentProfile(user_id=user_id, **raw)
+        raw = await firebase_service.get_student_profile(user_id)
+        if not raw:
+            return None
+        
+        # Ensure we have a valid dictionary to work with
+        profile_dict = dict(raw)
+        
+        # Force the user_id from the URL to be the one in the model
+        # Remove any existing user_id key to avoid potential conflicts in some Pydantic versions
+        profile_dict.pop("user_id", None)
+        profile_dict["user_id"] = user_id
+        
+        try:
+            # Return as the model (populate_by_name handles aliases like target_companies -> targetCompanies)
+            return StudentProfile(**profile_dict)
+        except Exception as p_err:
+            logger.warning("Pydantic validation failed for user_id=%s: %s. Falling back to dictionary.", user_id, p_err)
+            # Returning as a dict will skip response_model validation if it's too strict
+            return profile_dict
+            
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Profile parse error: {exc}") from exc
+        logger.exception("Critical error in get_profile for %s", user_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal Server Error: {str(exc)}"
+        ) from exc
 
 
 @app.post(
@@ -339,11 +353,6 @@ async def get_cached_plan(user_id: str, date: str) -> dict:
     the full pipeline. Useful for the frontend to reload today's plan.
     """
     plan = await firebase_service.get_daily_plan(user_id, date)
-    if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No plan found for user_id='{user_id}' on {date}.",
-        )
     return {"user_id": user_id, "date": date, "plan": plan}
 
 
@@ -585,6 +594,7 @@ class QuestionReview(BaseModel):
     model_answer_hint: str
 
 class SummaryRequest(BaseModel):
+    user_id: str = "anonymous"
     history: list[ChatMessage]
     company: str
     role: str
@@ -609,7 +619,7 @@ class SummaryResponse(BaseModel):
     tags=["Voice Interview"],
     status_code=status.HTTP_200_OK,
 )
-def interview_scrape_endpoint(req: ScrapeRequest):
+async def interview_scrape_endpoint(req: ScrapeRequest):
     """
     Scrapes DuckDuckGo / Bing / Google for real interview questions for the
     given company and role, then refines + supplements them via Groq.
@@ -620,7 +630,7 @@ def interview_scrape_endpoint(req: ScrapeRequest):
         raise HTTPException(status_code=400, detail="company cannot be empty")
     if not req.role.strip():
         raise HTTPException(status_code=400, detail="role cannot be empty")
-    result = scrape_questions(req.company.strip(), req.role.strip())
+    result = await scrape_questions(req.company.strip(), req.role.strip())
     return ScrapeResponse(**result)
 
 
@@ -631,7 +641,7 @@ def interview_scrape_endpoint(req: ScrapeRequest):
     tags=["Voice Interview"],
     status_code=status.HTTP_200_OK,
 )
-def interview_chat_endpoint(req: ChatRequest):
+async def interview_chat_endpoint(req: ChatRequest):
     """
     Powers the real-time mock interview loop.
 
@@ -653,7 +663,7 @@ def interview_chat_endpoint(req: ChatRequest):
     history_dicts = [msg.model_dump() for msg in req.history]
 
     try:
-        result = interview_chat(
+        result = await interview_chat(
             history=history_dicts,
             user_message=req.user_message.strip(),
             company=req.company,
@@ -674,14 +684,13 @@ def interview_chat_endpoint(req: ChatRequest):
     tags=["Voice Interview"],
     status_code=status.HTTP_200_OK,
 )
-def interview_summary_endpoint(req: SummaryRequest):
+async def interview_summary_endpoint(req: SummaryRequest):
     """
     Generate a detailed post-interview analysis from the full conversation
-    history. Call this when the interview ends (naturally or when user stops
-    early).
+    history. Call this when the interview ends.
 
-    Returns overall score, strengths, weaknesses, per-question reviews,
-    improvement areas, and a hire / borderline / no-hire recommendation.
+    Returns overall score, strengths, weaknesses, etc.
+    Persists the score to the user's performance history for Mission Control.
     """
     if len([m for m in req.history if m.role != "system"]) < 2:
         raise HTTPException(
@@ -692,12 +701,23 @@ def interview_summary_endpoint(req: SummaryRequest):
     history_dicts = [msg.model_dump() for msg in req.history]
 
     try:
-        result = generate_summary(
+        # generate_summary is now async
+        result = await generate_summary(
             history=history_dicts,
             company=req.company,
             role=req.role,
             questions_asked=req.questions_asked,
         )
+        
+        # Persist the score for Mission Control Burn-up Analytics
+        from utils.date_utils import today_utc
+        try:
+            await firebase_service.log_performance_score(
+                req.user_id, today_utc().isoformat(), result["overall_score"]
+            )
+        except Exception as e:
+            logger.warning("Failed to log interview score to performance history: %s", e)
+
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -705,8 +725,41 @@ def interview_summary_endpoint(req: SummaryRequest):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Module 4-B — Resume-Based Auto Apply Engine  (ported from backend_4)
+# Module 7: Autonomous Mission Control
 # ─────────────────────────────────────────────────────────────────────────────
+
+@app.get(
+    "/mission-control/status/{user_id}",
+    summary="Get mission control dashboard summary",
+    tags=["Mission Control"],
+    response_model=Any,
+)
+async def get_mission_control_status(user_id: str):
+    """
+    Returns Kanban board, Performance history, and Urgency Action center data.
+    """
+    try:
+        return await mission_control_service.get_mission_control_summary(user_id)
+    except Exception as exc:
+        logger.exception("Failed /mission-control/status: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch Mission Control data.")
+
+
+@app.post(
+    "/mission-control/sync/{user_id}",
+    summary="Sync Gmail status changes and update Kanban board",
+    tags=["Mission Control"],
+)
+async def sync_mission_control(request: Request, user_id: str):
+    """
+    Scans Gmail for application status updates and updates Firestore.
+    """
+    token = _extract_bearer_token(request)
+    try:
+        return await mission_control_service.sync_applications(user_id, token)
+    except Exception as exc:
+        logger.exception("Failed /mission-control/sync: %s", exc)
+        raise HTTPException(status_code=500, detail="Sync failed.")
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
@@ -1016,7 +1069,7 @@ class AnalyzeRequest(BaseModel):
     input_text: str
 
 class GmailScanRequest(BaseModel):
-    access_token: str
+    access_token: Optional[str] = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -1065,26 +1118,25 @@ async def analyze(request: AnalyzeRequest) -> dict:
     tags=["Company Intel & Prep"],
     status_code=status.HTTP_200_OK,
 )
-async def gmail_scan_endpoint(request: GmailScanRequest) -> dict:
+async def gmail_scan_endpoint(request: Request, body: Optional[GmailScanRequest] = None) -> dict:
     """
     Scans the authenticated user's Gmail for placement/interview emails
     (last 60 days), extracts all unique companies via Groq, and generates
     a complete prep pack for each.
 
-    Requires a valid Google OAuth access token with `gmail.readonly` scope —
-    the same token used by the Priority Engine (`Authorization: Bearer <token>`
-    on the frontend after Firebase Google Sign-In).
-
-    Returns:
-      - `mode`: `"gmail"`
-      - `emails_scanned`: number of emails fetched
-      - `companies`: list of prep packs (same shape as `/api/analyze` email mode)
+    Unifies Auth: Pulls Google OAuth token from 'Authorization: Bearer' header
+    (Firebase-native) or from the JSON body 'access_token' field.
     """
-    token = request.access_token
+    token = (body.access_token if body else None) or _extract_bearer_token(request)
+    
     if not token:
-        raise HTTPException(status_code=400, detail="Access token is required.")
+        logger.warning("[prep/gmail-scan] 401: No access token provided.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="Access token is required. Please grant Gmail permissions."
+        )
 
-    logger.info("[prep/gmail-scan] starting scan")
+    logger.info("[prep/gmail-scan] starting scan for authorized user")
     return await prep_service.gmail_scan(token)
 
 

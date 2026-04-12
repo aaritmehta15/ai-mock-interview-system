@@ -296,3 +296,40 @@ async def generate_daily_plan(sorted_events_json: str) -> Optional[dict]:
         logger.warning("Groq plan generation returned non-dict: %r", raw[:200])
         return None
     return parsed
+
+
+async def extract_application_status(subject: str, body: str) -> Optional[dict]:
+    """
+    Use Groq to determine if an email represents a job application status change.
+    Returns a dict with company and status, or None if irrelevant.
+    """
+    clean_subject = sanitize_email_text(subject)
+    clean_body    = sanitize_email_text(body)[:2000] # Truncate to save tokens
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an AI recruiter tracking application pipelines. "
+                "Classify emails into: 'applied', 'assessment', 'interview', 'offer', 'rejected'. "
+                "Respond ONLY with valid JSON or 'null'."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"SUBJECT: {clean_subject}\nBODY: {clean_body}\n\n"
+                "If this email is an update about a job application, return this JSON:\n"
+                "{\n"
+                '  "company": "<company name>",\n'
+                '  "status": "applied | assessment | interview | offer | rejected"\n'
+                "}\n"
+                "Otherwise return literal null."
+            ),
+        },
+    ]
+
+    raw = await _call_groq(messages, model=GROQ_CLASSIFY_MODEL, temperature=0.0, max_tokens=128)
+    if not raw or "null" in raw.lower():
+        return None
+    return extract_json(raw)

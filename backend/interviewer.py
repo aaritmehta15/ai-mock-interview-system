@@ -5,7 +5,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+from groq import AsyncGroq
+import asyncio
+
+load_dotenv()
+
+client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
 MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 MAX_HISTORY_MESSAGES = 20
@@ -41,11 +46,11 @@ RESPONSE FORMAT — always return valid JSON, no markdown, no extra text:
 }}"""
 
 
-def _run_groq(messages: list[dict], max_tokens: int = 600) -> str:
+async def _run_groq(messages: list[dict], max_tokens: int = 600) -> str:
     last_error = None
     for model in MODELS:
         try:
-            completion = client.chat.completions.create(
+            completion = await client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=0.7,
@@ -62,10 +67,10 @@ def _run_groq(messages: list[dict], max_tokens: int = 600) -> str:
     raise RuntimeError(f"All Groq models failed. Last error: {last_error}")
 
 
-def _safe_json_call(messages: list[dict], max_tokens: int = 600) -> dict:
+async def _safe_json_call(messages: list[dict], max_tokens: int = 600) -> dict:
     """Call Groq and parse JSON. Retry once on parse failure."""
     for attempt in range(2):
-        raw = _run_groq(messages, max_tokens)
+        raw = await _run_groq(messages, max_tokens)
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
@@ -83,7 +88,7 @@ def _prune_history(history: list[dict]) -> list[dict]:
     return system_msgs + other_msgs
 
 
-def chat(
+async def chat(
     history: list[dict],
     user_message: str,
     company: str,
@@ -100,7 +105,7 @@ def chat(
     )
     messages = _prune_history(messages)
 
-    parsed = _safe_json_call(messages)
+    parsed = await _safe_json_call(messages)
     return {
         "reply":         parsed.get("reply", ""),
         "feedback":      parsed.get("feedback", ""),
@@ -108,7 +113,7 @@ def chat(
     }
 
 
-def generate_summary(
+async def generate_summary(
     history: list[dict],
     company: str,
     role: str,
@@ -164,7 +169,7 @@ RESPONSE FORMAT — valid JSON only:
         {"role": "user",   "content": "Please generate the full post-interview summary now."},
     ]
 
-    parsed = _safe_json_call(messages, max_tokens=1500)
+    parsed = await _safe_json_call(messages, max_tokens=1500)
     return {
         "overall_score":      parsed.get("overall_score", 0),
         "overall_verdict":    parsed.get("overall_verdict", ""),
@@ -174,3 +179,4 @@ RESPONSE FORMAT — valid JSON only:
         "question_reviews":   parsed.get("question_reviews", []),
         "final_recommendation": parsed.get("final_recommendation", ""),
     }
+

@@ -79,17 +79,6 @@ export default function Profile() {
     }
   };
 
-  // Debounce all profile fields for auto-save
-  const debouncedProfile = useDebounce({ name, branch, year, cgpa, priorityBias, targetCompanies, skills }, 2500);
-
-  useEffect(() => {
-    if (loading) return;
-    
-    // Only save if it's been explicitly changed after initial load
-    // We can track if anything changed by comparing with initial state or just letting it run once
-    // To prevent a loop on the first load, handleSave already sets 'saving' state
-    handleSave();
-  }, [debouncedProfile]);
 
   const addCompany = () => {
     const v = companyInput.trim();
@@ -102,6 +91,8 @@ export default function Profile() {
     if (v && !skills.includes(v)) setSkills(p => [...p, v]);
     setSkillInput('');
   };
+
+  const [imgError, setImgError] = useState(false);
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
@@ -120,8 +111,8 @@ export default function Profile() {
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 36 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          {user.photoURL
-            ? <img src={user.photoURL} alt="" style={{ width: 52, height: 52, borderRadius: '50%', border: '2px solid rgba(124,58,237,0.4)' }} />
+          {user.photoURL && !imgError
+            ? <img src={user.photoURL} alt="" onError={() => setImgError(true)} style={{ width: 52, height: 52, borderRadius: '50%', border: '2px solid rgba(124,58,237,0.4)', objectFit: 'cover' }} />
             : (
               <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'linear-gradient(135deg,#7c3aed,#06b6d4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <User size={24} color="#fff" />
@@ -267,25 +258,6 @@ export default function Profile() {
           </div>
         </motion.div>
 
-        {/* Firestore Info */}
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16 }}
-          className="card" style={{ padding: 20, gridColumn: '1 / -1', background: 'rgba(6,182,212,0.04)', borderColor: 'rgba(6,182,212,0.15)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(6,182,212,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <BookOpen size={14} color="var(--cyan)" />
-            </div>
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Synced to Firebase Firestore</p>
-              <p style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                Stored at <code style={{ color: 'var(--cyan)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 4 }}>user_profiles/{user.uid}</code> · 
-                Used by the Priority Engine to boost scores for your target companies.
-              </p>
-            </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--emerald)' }}>
-              <TrendingUp size={13} />Project: lifeos-d46b1
-            </div>
-          </div>
-        </motion.div>
       </div>
 
       {/* Save button */}

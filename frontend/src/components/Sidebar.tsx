@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -13,6 +14,7 @@ const nav = [
   { to: '/interview',  icon: Mic,             label: 'Mock Interview',  color: '#a855f7' },
   { to: '/prep',       icon: Brain,           label: 'Company Prep',    color: '#10b981' },
   { to: '/apply',      icon: FileSearch,      label: 'Auto Apply',      color: '#f59e0b' },
+  { to: '/mission',    icon: Sparkles,        label: 'Mission Control', color: '#ec4899' },
 ];
 
 export default function Sidebar() {
@@ -20,6 +22,7 @@ export default function Sidebar() {
   const navigate = useNavigate();
 
   const handleLogout = async () => { await logout(); navigate('/'); };
+  const [imgError, setImgError] = useState(false);
 
   return (
     <aside className="sidebar">
@@ -76,8 +79,8 @@ export default function Sidebar() {
       {user && (
         <div style={{ padding: '12px 10px', borderTop: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--border)', marginBottom: 6 }}>
-            {user.photoURL
-              ? <img src={user.photoURL} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover' }} />
+            {user.photoURL && !imgError
+              ? <img src={user.photoURL} alt="" onError={() => setImgError(true)} style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover' }} />
               : <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--violet)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#fff' }}>{user.displayName?.[0] || 'U'}</div>
             }
             <div style={{ flex: 1, overflow: 'hidden' }}>
