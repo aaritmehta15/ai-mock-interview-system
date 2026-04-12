@@ -933,3 +933,100 @@ def generate_dynamic_search_urls(skills: list[str], category: str) -> list[dict]
         {"platform": "Indeed",     "url": f"https://www.indeed.com/jobs?q={encoded}&jt=internship"},
         {"platform": "Glassdoor",  "url": f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={encoded}"},
     ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gap Analysis & Project Suggestions (Resume Enhancements)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def analyze_resume_gaps(session_id: str) -> dict:
+    session = get_session(session_id)
+    if not session or not session.get("parsedProfile"):
+        raise ValueError("Invalid session or profile not parsed yet.")
+
+    profile = session["parsedProfile"]
+    
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an expert career counselor. Based on the user's resume profile (skills, projects, experience), "
+                "identify the main skill gaps for a typical high-paying Software/Tech role and provide 3-5 actionable "
+                "recommendations (like missing technologies or specific types of courses/certifications they should pursue).\n\n"
+                "Return JSON with EXACTLY this structure:\n"
+                "{\n"
+                '  "missing_skills": ["skill1", "skill2"],\n'
+                '  "actionable_steps": [\n'
+                '    {"action": "Action to take", "reason": "Why this matters", "type": "Course / Certification / Practice"}\n'
+                "  ]\n"
+                "}\n"
+                "No prose or markdown fences, ONLY JSON."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Analyze this profile for gaps: {json.dumps(profile)}",
+        },
+    ]
+
+    raw = await _call_groq(
+        messages, 
+        model="llama-3.1-8b-instant", 
+        temperature=0.2, 
+        max_tokens=1024,
+        response_format={"type": "json_object"}
+    )
+    if not raw:
+        raise ValueError("Groq AI failed to generate gap analysis.")
+    
+    parsed = extract_json(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("AI parsing returned invalid format.")
+    
+    return parsed
+
+
+async def suggest_projects(session_id: str) -> dict:
+    session = get_session(session_id)
+    if not session or not session.get("parsedProfile"):
+        raise ValueError("Invalid session or profile not parsed yet.")
+
+    profile = session["parsedProfile"]
+    
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an expert tech career coach. Based on the user's resume profile, suggest 3-5 high-impact, "
+                "trending project ideas that will significantly boost their portfolio for modern tech roles (e.g. AI, "
+                "Full Stack, Cloud).\n\n"
+                "Return JSON with EXACTLY this structure:\n"
+                "{\n"
+                '  "project_suggestions": [\n'
+                '    {"title": "Project Name", "description": "What it does", "tech_stack": ["tech1", "tech2"], "difficulty": "Medium"}\n'
+                "  ]\n"
+                "}\n"
+                "No prose or markdown fences, ONLY JSON."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Provide project suggestions for this profile: {json.dumps(profile)}",
+        },
+    ]
+
+    raw = await _call_groq(
+        messages, 
+        model="llama-3.1-8b-instant", 
+        temperature=0.7, 
+        max_tokens=1500,
+        response_format={"type": "json_object"}
+    )
+    if not raw:
+        raise ValueError("Groq AI failed to generate project suggestions.")
+    
+    parsed = extract_json(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("AI parsing returned invalid format.")
+    
+    return parsed

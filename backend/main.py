@@ -972,6 +972,40 @@ async def auto_apply_process_all(
     }
 
 
+@app.post(
+    "/auto-apply/gaps",
+    summary="Analyze resume gaps and recommend actionable steps",
+    tags=["Auto Apply Engine"],
+    status_code=status.HTTP_200_OK,
+)
+async def get_auto_apply_gaps(body: AutoApplyParseRequest) -> dict:
+    """Analyze the parsed profile for skill gaps and suggest courses."""
+    try:
+        return await auto_apply_service.analyze_resume_gaps(body.sessionId)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("analyze_resume_gaps failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to analyze resume gaps.")
+
+
+@app.post(
+    "/auto-apply/projects",
+    summary="Suggest trending project ideas based on profile",
+    tags=["Auto Apply Engine"],
+    status_code=status.HTTP_200_OK,
+)
+async def get_auto_apply_projects(body: AutoApplyParseRequest) -> dict:
+    """Ask Groq for 3-5 trending project ideas based on current skills and modern roles."""
+    try:
+        return await auto_apply_service.suggest_projects(body.sessionId)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("suggest_projects failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to suggest projects.")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Module 3 — Company Intel + Smart Prep Engine  (ported from backend-3)
 # ─────────────────────────────────────────────────────────────────────────────

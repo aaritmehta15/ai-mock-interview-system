@@ -73,6 +73,12 @@ export const getOpportunities = (sessionId: string) =>
 export const getAutoApplyResults = (sessionId: string) =>
   api.get(`/auto-apply/results/${sessionId}`).then(r => r.data);
 
+export const getResumeGaps = (sessionId: string) =>
+  api.post('/auto-apply/gaps', { sessionId }).then(r => r.data);
+
+export const getProjectSuggestions = (sessionId: string) =>
+  api.post('/auto-apply/projects', { sessionId }).then(r => r.data);
+
 // ── Health ───────────────────────────────────────────────────────────────────
 export const health = () => api.get('/health').then(r => r.data);
 

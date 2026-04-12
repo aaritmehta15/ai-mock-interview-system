@@ -57,6 +57,7 @@ async def _call_groq(
     model: str = "",
     temperature: float = 0.1,
     max_tokens: int = _MAX_TOKENS,
+    response_format: Optional[dict] = None,
 ) -> Optional[str]:
     """
     Send a chat completion request to Groq and return the assistant's text.
@@ -79,6 +80,8 @@ async def _call_groq(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if response_format:
+        payload["response_format"] = response_format
 
     for attempt, delay in enumerate([0.0] + _RETRY_DELAYS, start=1):
         if delay:

@@ -1,8 +1,8 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion } from 'framer-motion';
-import { FileSearch, Upload, CheckCircle, ExternalLink, Filter, RotateCcw } from 'lucide-react';
-import { processResumeAll } from '../lib/api';
+import { FileSearch, Upload, CheckCircle, ExternalLink, Filter, RotateCcw, AlertCircle, BookOpen, Layers } from 'lucide-react';
+import { processResumeAll, getResumeGaps, getProjectSuggestions } from '../lib/api';
 
 type Difficulty = 'Easy'|'Medium'|'Hard'|'All';
 type FilterState = { difficulty: Difficulty; platform: string; category: string };
@@ -45,6 +45,9 @@ export default function AutoApply() {
   const [error,    setError]    = useState('');
   const [file,     setFile]     = useState<File|null>(null);
   const [filters,  setFilters]  = useState<FilterState>({ difficulty:'All', platform:'All', category:'All' });
+  const [gaps, setGaps] = useState<any>(null);
+  const [projects, setProjects] = useState<any>(null);
+  const [loadingExtras, setLoadingExtras] = useState(false);
 
   const onDrop = useCallback((accepted: File[]) => {
     if (accepted[0]) setFile(accepted[0]);
@@ -55,17 +58,32 @@ export default function AutoApply() {
     maxSize: 10*1024*1024, multiple: false,
   });
 
+  const fetchEnhancements = async (sessionId: string) => {
+    setLoadingExtras(true);
+    try {
+      const [gData, pData] = await Promise.all([
+        getResumeGaps(sessionId).catch(() => null),
+        getProjectSuggestions(sessionId).catch(() => null)
+      ]);
+      if (gData) setGaps(gData);
+      if (pData) setProjects(pData);
+    } catch (e) { console.error(e); }
+    finally { setLoadingExtras(false); }
+  };
+
   const handleProcess = async () => {
     if (!file) return;
-    setLoading(true); setError(''); setResult(null); setProgress(0);
+    setLoading(true); setError(''); setResult(null); setProgress(0); 
+    setGaps(null); setProjects(null);
     try {
       const data = await processResumeAll(file, p => setProgress(p));
       setResult(data);
+      fetchEnhancements(data.sessionId);
     } catch (e: any) { setError(e.response?.data?.detail || e.message); }
     finally { setLoading(false); }
   };
 
-  const reset = () => { setResult(null); setFile(null); setError(''); setProgress(0); };
+  const reset = () => { setResult(null); setFile(null); setError(''); setProgress(0); setGaps(null); setProjects(null); };
 
   // Filter logic
   const filtered = (result?.opportunities || []).filter((o: any) => {
@@ -209,6 +227,66 @@ export default function AutoApply() {
               </div>
             </div>
           )}
+
+          {/* Enhancements (Gaps & Projects) */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))', gap:20, marginBottom:20 }}>
+            {/* Gaps */}
+            <div className="card" style={{ padding:20 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+                <h4 style={{ fontSize:14, fontWeight:700, display:'flex', alignItems:'center', gap:6 }}><AlertCircle size={15} color="var(--rose)"/> Resume Gaps</h4>
+                {loadingExtras && !gaps && <div className="spinner" style={{ width:14, height:14 }} />}
+              </div>
+              {gaps ? (
+                <div>
+                  {gaps.missing_skills?.length > 0 && (
+                    <div style={{ marginBottom:14 }}>
+                      <p style={{ fontSize:10, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', marginBottom:6 }}>Missing Skills</p>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                        {gaps.missing_skills.map((s:string, i:number) => <span key={i} className="chip" style={{ fontSize:11, background:'rgba(244,63,94,0.1)', color:'var(--rose)' }}>{s}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {gaps.actionable_steps?.length > 0 && (
+                    <div>
+                      <p style={{ fontSize:10, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', marginBottom:6 }}>Recommended Actions</p>
+                      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                        {gaps.actionable_steps.map((a:any, i:number) => (
+                          <div key={i} style={{ padding:'10px', background:'var(--surface-2)', borderRadius:8, border:'1px solid var(--border)' }}>
+                            <p style={{ fontSize:12, fontWeight:700, marginBottom:4, display:'flex', alignItems:'center', gap:6 }}><BookOpen size={12} color="var(--cyan)"/> {a.action}</p>
+                            <p style={{ fontSize:11, color:'var(--text-3)' }}>{a.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : !loadingExtras ? <p style={{ fontSize:12, color:'var(--text-3)' }}>Not available</p> : <p style={{ fontSize:12, color:'var(--text-3)' }}>Analyzing gaps...</p>}
+            </div>
+
+            {/* Projects */}
+            <div className="card" style={{ padding:20 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+                <h4 style={{ fontSize:14, fontWeight:700, display:'flex', alignItems:'center', gap:6 }}><Layers size={15} color="var(--emerald)"/> Project Suggestions</h4>
+                {loadingExtras && !projects && <div className="spinner" style={{ width:14, height:14 }} />}
+              </div>
+              {projects ? (
+                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  {projects.project_suggestions?.map((p:any, i:number) => (
+                    <div key={i} style={{ padding:'12px', background:'var(--surface-2)', borderRadius:8, border:'1px solid var(--border)' }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6 }}>
+                        <p style={{ fontSize:13, fontWeight:700 }}>{p.title}</p>
+                        <span className="chip" style={{ fontSize:9 }}>{p.difficulty}</span>
+                      </div>
+                      <p style={{ fontSize:11, color:'var(--text-2)', marginBottom:8 }}>{p.description}</p>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
+                        {p.tech_stack?.slice(0,4).map((tech:string, j:number) => <span key={j} className="chip chip-cyan" style={{ fontSize:9 }}>{tech}</span>)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : !loadingExtras ? <p style={{ fontSize:12, color:'var(--text-3)' }}>Not available</p> : <p style={{ fontSize:12, color:'var(--text-3)' }}>Generating projects...</p>}
+            </div>
+          </div>
 
           {/* Filters + Opportunities */}
           <div style={{ display:'flex', gap:20, alignItems:'flex-start' }}>
