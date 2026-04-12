@@ -141,26 +141,33 @@ Your task:
 Return ONLY a JSON object: {{"questions": ["Q1?", "Q2?", ...]}}
 Minimum 10 questions. Every entry MUST end with a question mark."""
 
-    try:
-        completion = await _groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that outputs valid JSON only."},
-                {"role": "user",   "content": prompt},
-            ],
-            temperature=0.6,
-            max_tokens=1500,
-            response_format={"type": "json_object"},
-        )
-        raw = completion.choices[0].message.content
-        parsed = json.loads(raw)
-        questions = parsed.get("questions", [])
-        cleaned = [q.strip() for q in questions if isinstance(q, str) and len(q) > 10]
-        cleaned = [q if q.endswith("?") else q + "?" for q in cleaned]
-        return cleaned
-    except Exception as e:
-        print(f"[scraper] Groq refinement error: {e}")
-        return []
+    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    for model in models:
+        try:
+            completion = await _groq_client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that outputs valid JSON only."},
+                    {"role": "user",   "content": prompt},
+                ],
+                temperature=0.6,
+                max_tokens=1500,
+                response_format={"type": "json_object"},
+            )
+            raw = completion.choices[0].message.content
+            parsed = json.loads(raw)
+            questions = parsed.get("questions", [])
+            cleaned = [q.strip() for q in questions if isinstance(q, str) and len(q) > 10]
+            cleaned = [q if q.endswith("?") else q + "?" for q in cleaned]
+            return cleaned
+        except Exception as e:
+            if "429" in str(e) or "rate_limit" in str(e).lower() or "quota" in str(e).lower():
+                print(f"[scraper] Groq rate limit on {model}, trying next...")
+                continue
+            print(f"[scraper] Groq refinement error on {model}: {e}")
+            break
+            
+    return []
 
 
 # ─── Public entry point ────────────────────────────────────────────────────────

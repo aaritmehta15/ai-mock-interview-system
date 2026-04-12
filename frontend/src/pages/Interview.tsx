@@ -73,10 +73,20 @@ export default function Interview() {
       setHistory(newHist);
       if (next_question && !as.includes(next_question)) setAsked(p => [...p, next_question]);
       const pf = parseFeedback(fb);
-      if (pf) { setFeedback({reply,...pf}); setState('feedback'); setCurrentQ(next_question||''); }
-      else {
+      if (pf) {
+        // Show feedback card — user must click 'Next Question' to continue
+        setFeedback({reply,...pf});
+        setState('feedback');
+        setCurrentQ(next_question || '');
+        // Speak the reply aloud while showing the feedback card
+        speak(`${reply}`);
+      } else {
+        // First question turn — speak it and wait for user to click mic
+        const questionToAsk = next_question || '';
+        setCurrentQ(questionToAsk);
         setState('interviewing');
-        speak(reply, () => { if (next_question) { setCurrentQ(next_question); speak(next_question); } });
+        speak(questionToAsk ? `${reply} Here is your first question: ${questionToAsk}` : reply);
+        // Do NOT auto-call startListening — mic button is visible for user to click
       }
     } catch (e: any) { setError(e.message); setState('error'); }
   };
@@ -135,7 +145,10 @@ export default function Interview() {
   const handleContinue = () => {
     setFeedback(null); setLiveText('');
     if (!currentQ) { handleSummary(); return; }
-    setState('interviewing'); speak(currentQ);
+    setState('interviewing'); 
+    speak(currentQ, () => {
+      startListening();
+    });
   };
 
   const reset = () => {
@@ -245,6 +258,13 @@ export default function Interview() {
             </motion.div>
           )}
 
+          {/* Question Text displayed boldly */}
+          {state === 'interviewing' && currentQ && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card" style={{ padding: 24, textAlign: 'center', border: '1px solid var(--violet-light)', background: 'rgba(139, 92, 246, 0.05)' }}>
+              <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--violet-light)' }}>{currentQ}</p>
+            </motion.div>
+          )}
+
           {/* Controls */}
           {state === 'interviewing' && (
             <div className="card" style={{ padding:24, display:'flex', flexDirection:'column', alignItems:'center', gap:12 }}>
@@ -254,7 +274,7 @@ export default function Interview() {
                 <Mic size={28} color="#fff" />
               </motion.button>
               <p style={{ fontSize:13, color:'var(--text-2)' }}>{isSpeaking ? 'Alex is speaking…' : 'Click to answer'}</p>
-              <button onClick={() => { setState('interviewing'); setCurrentQ(prev => { handleSummary(); return prev; }); }} className="btn btn-ghost" style={{ fontSize:12, gap:6 }}><SkipForward size={13} /> Skip to summary</button>
+              <button onClick={handleSummary} className="btn btn-ghost" style={{ fontSize:12, gap:6 }}><SkipForward size={13} /> Skip to summary</button>
             </div>
           )}
 
@@ -333,6 +353,25 @@ export default function Interview() {
                 {(summary.weaknesses||[]).map((w:string,i:number) => <div key={i} style={{ padding:'6px 10px', background:'rgba(244,63,94,0.08)', borderRadius:6, fontSize:12, color:'var(--text-2)', marginBottom:4 }}>{w}</div>)}
               </div>
             </div>
+
+            {summary.question_reviews && summary.question_reviews.length > 0 && (
+              <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--border)' }}>
+                <p style={{ fontSize:16, fontWeight:700, marginBottom:16 }}>Question & Answer Analysis</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {summary.question_reviews.map((qr: any, idx: number) => (
+                    <div key={idx} style={{ padding: 16, background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Q{idx + 1}: {qr.question}</p>
+                      <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+                        <span style={{ fontSize: 11, padding: '4px 8px', borderRadius: 4, background: qr.score >= 8 ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', color: qr.score >= 8 ? 'var(--emerald)' : 'var(--amber)', fontWeight: 700 }}>Score: {qr.score}/10</span>
+                      </div>
+                      <p style={{ fontSize: 13, marginBottom: 4 }}><strong style={{ color: 'var(--emerald)' }}>Good:</strong> {qr.what_was_good}</p>
+                      <p style={{ fontSize: 13, marginBottom: 4 }}><strong style={{ color: 'var(--rose)' }}>Missing:</strong> {qr.what_was_missing}</p>
+                      <p style={{ fontSize: 13, padding: '8px 12px', background: 'rgba(14,165,233,0.1)', borderLeft: '3px solid var(--violet-light)', borderRadius: '0 4px 4px 0', marginTop: 8 }}><strong style={{ color: 'var(--violet-light)' }}>Hint:</strong> {qr.model_answer_hint}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <button onClick={reset} className="btn btn-primary" style={{ gap:8 }}><RotateCcw size={14} /> Start New Interview</button>
         </motion.div>

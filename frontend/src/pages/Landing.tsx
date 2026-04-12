@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Zap, Mic, Brain, FileSearch, ArrowRight, Globe2, Sun, Moon } from 'lucide-react';
@@ -35,7 +35,13 @@ export default function Landing() {
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState('');
 
-  if (!loading && user) { navigate('/dashboard', { replace: true }); return null; }
+  useEffect(() => {
+    if (!loading && user) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [loading, user, navigate]);
+
+  if (!loading && user) return null;
 
   const handleSignIn = async () => {
     setSigning(true); setError('');
