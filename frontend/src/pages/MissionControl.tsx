@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'; // RE-SCAN
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Activity, Target, Award, ShieldAlert, Sparkles, 
+  Activity, Target, Award, ShieldAlert, 
   RefreshCcw, ChevronRight, TrendingUp, Calendar, 
   Briefcase, CheckCircle2, Clock, Inbox
 } from 'lucide-react';
@@ -15,7 +15,7 @@ import { getMissionControlStatus, syncMissionControl } from '../lib/api';
 const STATUS_COLUMNS = [
   { id: 'applied', label: 'Applied', color: '#94a3b8', icon: Inbox },
   { id: 'assessment', label: 'Assessment', color: '#f59e0b', icon: Clock },
-  { id: 'interview', label: 'Interview', color: '#a855f7', icon: Activity },
+  { id: 'interview', label: 'Interview', color: '#0ea5e9', icon: Activity },
   { id: 'offer', label: 'Offer', color: '#10b981', icon: Award },
 ];
 
@@ -93,7 +93,7 @@ export default function MissionControl() {
               Authorized Account: <span style={{ color: 'var(--violet-light)', fontWeight: 600 }}>{user?.email}</span>
             </p>
             <p style={{ fontSize: 9, color: 'var(--text-3)', opacity: 0.7 }}>
-              AI Agent will scan primary inbox for job status updates.
+              System will scan primary inbox for job status updates.
             </p>
           </div>
         </div>
@@ -111,7 +111,7 @@ export default function MissionControl() {
                 <Briefcase size={18} color="var(--text-3)" />
                 <h3 style={{ fontSize: 16, fontWeight: 700 }}>Ghost-Managed Pipeline</h3>
               </div>
-              <span className="chip" style={{ fontSize: 10, background: 'rgba(124,58,237,0.1)', color: 'var(--violet)' }}>
+              <span className="chip" style={{ fontSize: 10, background: 'rgba(14,165,233,0.1)', color: 'var(--violet)' }}>
                 AUTO-SYNC ON
               </span>
             </div>
@@ -165,8 +165,8 @@ export default function MissionControl() {
                 <AreaChart data={data?.performance_history || []}>
                   <defs>
                     <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -176,15 +176,15 @@ export default function MissionControl() {
                     contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}
                     itemStyle={{ fontSize: 12, fontWeight: 600 }}
                   />
-                  <Area type="monotone" dataKey="interview_score" name="Interview Score" stroke="#a855f7" strokeWidth={3} fillOpacity={1} fill="url(#colorScore)" />
+                  <Area type="monotone" dataKey="interview_score" name="Interview Score" stroke="#0ea5e9" strokeWidth={3} fillOpacity={1} fill="url(#colorScore)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
             
             <div style={{ marginTop: 20, display: 'flex', gap: 24 }}>
-               <div className="card" style={{ flex: 1, padding: 16, background: 'rgba(168,85,247,0.05)', border: 'none' }}>
+               <div className="card" style={{ flex: 1, padding: 16, background: 'rgba(14,165,233,0.05)', border: 'none' }}>
                   <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>AVG INTERVIEW SCORE</p>
-                  <p style={{ fontSize: 24, fontWeight: 800, color: '#a855f7' }}>
+                  <p style={{ fontSize: 24, fontWeight: 800, color: '#0ea5e9' }}>
                     {data?.performance_history?.length > 0
                       ? Math.round(data.performance_history.reduce((a: any, b: any) => a + (b.interview_score || 0), 0) / data.performance_history.length)
                       : 0}%
@@ -212,13 +212,13 @@ export default function MissionControl() {
             {data?.urgency_level === 'high' && (
               <motion.div 
                 animate={{ opacity: [0.1, 0.2, 0.1] }} transition={{ repeat: Infinity, duration: 2 }}
-                style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at top right, #ef4444, transparent 70%)' }}
+                style={{ position: 'absolute', inset: 0, background: 'none' }}
               />
             )}
             
             <div style={{ position: 'relative', zIndex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-                {data?.urgency_level === 'high' ? <ShieldAlert size={18} color="#ef4444" /> : <Sparkles size={18} color="var(--violet)" />}
+                {data?.urgency_level === 'high' ? <ShieldAlert size={18} color="#ef4444" /> : <Award size={18} color="var(--violet)" />}
                 <h3 style={{ fontSize: 16, fontWeight: 700 }}>Dynamic Action Center</h3>
               </div>
 
@@ -253,7 +253,7 @@ export default function MissionControl() {
                 <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                   <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--violet)', marginTop: 6 }} />
                   <div>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>AI Sync: {app.company} status moved to {app.status}</p>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Pipeline: {app.company} status moved to {app.status}</p>
                     <p style={{ fontSize: 10, color: 'var(--text-3)' }}>{new Date(app.last_updated).toLocaleTimeString()}</p>
                   </div>
                 </div>

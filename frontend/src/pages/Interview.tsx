@@ -151,7 +151,7 @@ export default function Interview() {
       {/* Header */}
       <motion.div initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:28 }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <div style={{ width:40, height:40, borderRadius:12, background:'rgba(168,85,247,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ width:40, height:40, borderRadius:12, background:'rgba(14,165,233,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
             <Mic size={20} color="var(--violet-light)" />
           </div>
           <div>
@@ -192,7 +192,7 @@ export default function Interview() {
         <div className="card" style={{ padding:48, textAlign:'center' }}>
           <div className="spinner" style={{ width:40, height:40, margin:'0 auto 20px' }} />
           <p style={{ fontSize:16, fontWeight:600 }}>Finding real interview questions…</p>
-          <p style={{ fontSize:13, color:'var(--text-3)', marginTop:6 }}>Searching DuckDuckGo → Bing → Google · then refining with AI</p>
+          <p style={{ fontSize:13, color:'var(--text-3)', marginTop:6 }}>Searching DuckDuckGo → Bing → Google · then refining results</p>
         </div>
       )}
 
@@ -227,9 +227,9 @@ export default function Interview() {
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
           {/* Alex card */}
           {state !== 'feedback' && (
-            <motion.div initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} className="card" style={{ padding:28, border:`1px solid ${isSpeaking ? 'rgba(124,58,237,0.5)' : 'var(--border)'}`, boxShadow: isSpeaking ? '0 0 32px var(--violet-glow)' : 'none' }}>
+            <motion.div initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} className="card" style={{ padding:28, border:`1px solid ${isSpeaking ? 'rgba(14,165,233,0.5)' : 'var(--border)'}`, boxShadow: isSpeaking ? '0 0 20px rgba(14,165,233,0.2)' : 'none' }}>
               <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
-                <div style={{ width:36, height:36, borderRadius:'50%', background:'linear-gradient(135deg,#7c3aed,#06b6d4)', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:15, color:'#fff' }}>A</div>
+                <div style={{ width:36, height:36, borderRadius:'50%', background:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:15, color:'#fff' }}>A</div>
                 <div>
                   <p style={{ fontSize:13, fontWeight:600 }}>Alex</p>
                   <p style={{ fontSize:11, color:'var(--text-3)' }}>Senior Interviewer · {company}</p>
@@ -250,7 +250,7 @@ export default function Interview() {
             <div className="card" style={{ padding:24, display:'flex', flexDirection:'column', alignItems:'center', gap:12 }}>
               <motion.button whileHover={{ scale:1.05 }} whileTap={{ scale:0.97 }}
                 onClick={startListening} disabled={isSpeaking}
-                style={{ width:72, height:72, borderRadius:'50%', background:'linear-gradient(135deg,#7c3aed,#a855f7)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 0 32px var(--violet-glow)' }}>
+                style={{ width:72, height:72, borderRadius:'50%', background:'var(--accent)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
                 <Mic size={28} color="#fff" />
               </motion.button>
               <p style={{ fontSize:13, color:'var(--text-2)' }}>{isSpeaking ? 'Alex is speaking…' : 'Click to answer'}</p>
@@ -261,7 +261,7 @@ export default function Interview() {
           {state === 'listening' && (
             <div className="card" style={{ padding:24, display:'flex', flexDirection:'column', alignItems:'center', gap:12 }}>
               <motion.button whileHover={{ scale:1.03 }} onClick={stopListening}
-                style={{ width:72, height:72, borderRadius:'50%', background:'linear-gradient(135deg,var(--rose),#f97316)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 0 32px rgba(244,63,94,0.4)', animation:'pulse-glow 1.5s ease infinite' }}>
+                style={{ width:72, height:72, borderRadius:'50%', background:'var(--rose)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
                 <MicOff size={28} color="#fff" />
               </motion.button>
               <p style={{ fontSize:13, color:'var(--rose)', fontWeight:600 }}>Recording… click to stop</p>
@@ -283,13 +283,13 @@ export default function Interview() {
 
           {/* Feedback */}
           {state === 'feedback' && feedback && (
-            <motion.div initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} className="card" style={{ padding:28, border:'1px solid rgba(124,58,237,0.3)' }}>
+            <motion.div initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} className="card" style={{ padding:28, border:'1px solid rgba(14,165,233,0.3)' }}>
               <h3 style={{ fontSize:15, fontWeight:700, marginBottom:16, color:'var(--violet-light)' }}>Alex's Feedback</h3>
               {feedback.reply && <p style={{ fontSize:14, color:'var(--text-2)', fontStyle:'italic', marginBottom:16 }}>"{feedback.reply}"</p>}
               <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:20 }}>
-                {feedback.good    && <div style={{ padding:'10px 14px', background:'rgba(16,185,129,0.1)',  borderRadius:8, border:'1px solid rgba(16,185,129,0.2)',  fontSize:13 }}><strong style={{ color:'var(--emerald)' }}>✓ Good:</strong> {feedback.good}</div>}
-                {feedback.missing && <div style={{ padding:'10px 14px', background:'rgba(245,158,11,0.1)', borderRadius:8, border:'1px solid rgba(245,158,11,0.2)', fontSize:13 }}><strong style={{ color:'var(--amber)' }}>⚠ Missing:</strong> {feedback.missing}</div>}
-                {feedback.improve && <div style={{ padding:'10px 14px', background:'rgba(124,58,237,0.1)', borderRadius:8, border:'1px solid rgba(124,58,237,0.2)', fontSize:13 }}><strong style={{ color:'var(--violet-light)' }}>↑ Improve:</strong> {feedback.improve}</div>}
+                {feedback.good    && <div style={{ padding:'10px 14px', background:'rgba(16,185,129,0.1)',  borderRadius:8, border:'1px solid rgba(16,185,129,0.2)',  fontSize:13 }}><strong style={{ color:'var(--emerald)' }}>Good:</strong> {feedback.good}</div>}
+                {feedback.missing && <div style={{ padding:'10px 14px', background:'rgba(245,158,11,0.1)', borderRadius:8, border:'1px solid rgba(245,158,11,0.2)', fontSize:13 }}><strong style={{ color:'var(--amber)' }}>Missing:</strong> {feedback.missing}</div>}
+                {feedback.improve && <div style={{ padding:'10px 14px', background:'rgba(14,165,233,0.1)', borderRadius:8, border:'1px solid rgba(14,165,233,0.2)', fontSize:13 }}><strong style={{ color:'var(--violet-light)' }}>Improve:</strong> {feedback.improve}</div>}
               </div>
               <div style={{ display:'flex', gap:10 }}>
                 <button onClick={handleContinue} className="btn btn-primary" style={{ fontSize:13 }}>{currentQ ? 'Next Question →' : 'Finish & Get Summary'}</button>
@@ -325,11 +325,11 @@ export default function Interview() {
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
               <div>
-                <p style={{ fontSize:12, fontWeight:700, color:'var(--emerald)', marginBottom:8 }}>✓ Strengths</p>
+                <p style={{ fontSize:12, fontWeight:700, color:'var(--emerald)', marginBottom:8 }}>Strengths</p>
                 {(summary.strengths||[]).map((s:string,i:number) => <div key={i} style={{ padding:'6px 10px', background:'rgba(16,185,129,0.08)', borderRadius:6, fontSize:12, color:'var(--text-2)', marginBottom:4 }}>{s}</div>)}
               </div>
               <div>
-                <p style={{ fontSize:12, fontWeight:700, color:'var(--rose)', marginBottom:8 }}>✗ Weaknesses</p>
+                <p style={{ fontSize:12, fontWeight:700, color:'var(--rose)', marginBottom:8 }}>Weaknesses</p>
                 {(summary.weaknesses||[]).map((w:string,i:number) => <div key={i} style={{ padding:'6px 10px', background:'rgba(244,63,94,0.08)', borderRadius:6, fontSize:12, color:'var(--text-2)', marginBottom:4 }}>{w}</div>)}
               </div>
             </div>

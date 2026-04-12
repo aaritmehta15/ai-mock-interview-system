@@ -114,7 +114,7 @@ export default function PriorityEngine() {
           </div>
         </div>
         <p style={{ fontSize:14, color:'var(--text-2)', maxWidth:560 }}>
-          Connects to Gmail and Calendar. Extractions are AI priority-scored. 
+          Connects to Gmail and Calendar. Extractions are automatically priority-scored. 
         </p>
 
         {/* Tabs */}
@@ -175,7 +175,7 @@ export default function PriorityEngine() {
                   {(plan.reason || plan.plan?.reason) && <p style={{ fontSize:13, color:'var(--text-2)' }}>{plan.reason || plan.plan?.reason}</p>}
                   {(plan.warning || plan.plan?.warning) && (
                     <div style={{ marginTop:12, padding:'10px 14px', background:'rgba(244,63,94,0.1)', border:'1px solid rgba(244,63,94,0.2)', borderRadius:8, fontSize:13, color:'var(--rose)' }}>
-                      ⚠ {plan.warning || plan.plan?.warning}
+                      Warning: {plan.warning || plan.plan?.warning}
                     </div>
                   )}
                 </div>
@@ -189,7 +189,7 @@ export default function PriorityEngine() {
                     <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                       {(plan.hourly_breakdown || plan.plan?.hourly_breakdown || []).map((item: any, i: number) => (
                         <div key={i} style={{ display:'flex', gap:14, padding:'12px 16px', background:'var(--surface-2)', borderRadius:10, border:'1px solid var(--border)' }}>
-                          <div style={{ width:52, height:52, borderRadius:10, background:'rgba(124,58,237,0.15)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                          <div style={{ width:52, height:52, borderRadius:10, background:'rgba(14,165,233,0.15)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
                             <span style={{ fontSize:16, fontWeight:800, color:'var(--violet-light)' }}>{item.hours}</span>
                             <span style={{ fontSize:9, color:'var(--text-3)' }}>hrs</span>
                           </div>

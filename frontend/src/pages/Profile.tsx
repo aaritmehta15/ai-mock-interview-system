@@ -9,9 +9,9 @@ import { getProfile, updateProfile } from '../lib/api';
 import { useDebounce } from '../hooks/useDebounce';
 
 const BIAS_OPTIONS = [
-  { value: 'high_package', label: '💰 High Package', desc: 'Prioritise highest-paying offers' },
-  { value: 'learning', label: '🧠 Learning & Growth', desc: 'Prioritise innovative companies' },
-  { value: 'stability', label: '🏛️ Stability', desc: 'Prioritise stable, established firms' },
+  { value: 'high_package', label: 'High Package', desc: 'Prioritise highest-paying offers' },
+  { value: 'learning', label: 'Learning & Growth', desc: 'Prioritise innovative companies' },
+  { value: 'stability', label: 'Stability', desc: 'Prioritise stable, established firms' },
 ];
 
 const BRANCHES = ['CSE', 'IT', 'ECE', 'EEE', 'ME', 'CE', 'AIDS', 'AIML', 'DS', 'Other'];
@@ -112,9 +112,9 @@ export default function Profile() {
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 36 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
           {user.photoURL && !imgError
-            ? <img src={user.photoURL} alt="" onError={() => setImgError(true)} style={{ width: 52, height: 52, borderRadius: '50%', border: '2px solid rgba(124,58,237,0.4)', objectFit: 'cover' }} />
+            ? <img src={user.photoURL} alt="" onError={() => setImgError(true)} style={{ width: 52, height: 52, borderRadius: '50%', border: '2px solid rgba(14,165,233,0.4)', objectFit: 'cover' }} />
             : (
-              <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'linear-gradient(135deg,#7c3aed,#06b6d4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <User size={24} color="#fff" />
               </div>
             )

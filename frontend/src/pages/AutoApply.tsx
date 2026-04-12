@@ -14,7 +14,7 @@ function OpportunityCard({ opp, index }: { opp: any; index: number }) {
       href={opp.link} target="_blank" rel="noopener noreferrer"
       initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.02*index }}
       className="card" style={{ padding:20, display:'flex', flexDirection:'column', gap:12, textDecoration:'none', color:'var(--text)', cursor:'pointer' }}
-      whileHover={{ y:-2, boxShadow:'0 4px 24px rgba(124,58,237,0.15)' }}
+      whileHover={{ y:-2, boxShadow:'0 4px 24px rgba(14,165,233,0.15)' }}
     >
       <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:8 }}>
         <div style={{ flex:1 }}>
@@ -149,7 +149,7 @@ export default function AutoApply() {
               )}
               <button onClick={handleProcess} disabled={loading} className="btn btn-primary" style={{ gap:8 }}>
                 {loading
-                  ? <><div className="spinner" style={{ width:16, height:16, borderWidth:2 }} />Analyzing with AI…</>
+                  ? <><div className="spinner" style={{ width:16, height:16, borderWidth:2 }} />Analyzing profile…</>
                   : <><FileSearch size={15} />Analyze & Match</>}
               </button>
             </div>
@@ -160,13 +160,15 @@ export default function AutoApply() {
           {/* Features */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:12, marginTop:32 }}>
             {[
-              { icon:'🧠', label:'AI Parsing',     color:'var(--violet-light)', desc:'Groq extracts all skills' },
-              { icon:'🎯', label:'Role Matching',   color:'var(--cyan)',         desc:'9 role categories' },
-              { icon:'💡', label:'Why It Fits',     color:'var(--emerald)',      desc:'Personalised AI blurbs' },
-              { icon:'🔗', label:'Direct Links',    color:'var(--amber)',        desc:'LinkedIn, Internshala…' },
-            ].map(({ icon, label, color, desc }, i) => (
+              { label:'Text Parsing',     color:'var(--violet-light)', desc:'Groq extracts all skills' },
+              { label:'Job Matching',     color:'var(--amber)',        desc:'Roles found' },
+              { label:'Why It Fits',     color:'var(--emerald)',      desc:'Personalised blurbs' },
+              { label:'Direct Links',    color:'var(--amber)',        desc:'LinkedIn, Internshala...' },
+            ].map(({ label, color, desc }, i) => (
               <div key={i} className="card" style={{ padding:'18px 16px', textAlign:'center' }}>
-                <p style={{ fontSize:24, marginBottom:8 }}>{icon}</p>
+                <div style={{ width:36, height:36, borderRadius:10, background:`${color}14`, display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 10px' }}>
+                  <div style={{ width:10, height:10, borderRadius:'50%', background:color }} />
+                </div>
                 <p style={{ fontSize:13, fontWeight:700, color, marginBottom:4 }}>{label}</p>
                 <p style={{ fontSize:11, color:'var(--text-3)' }}>{desc}</p>
               </div>

@@ -4,6 +4,7 @@ from urllib.parse import quote_plus
 import json
 import os
 import random
+from dotenv import load_dotenv
 from groq import AsyncGroq
 import asyncio
 

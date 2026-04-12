@@ -46,7 +46,7 @@ function PrepPack({ data }: { data: any }) {
 
       {/* Questions */}
       {pack.top_questions?.length > 0 && (
-        <Section title={`📋 ${pack.top_questions.length} Interview Questions`} color="var(--cyan)">
+        <Section title={`${pack.top_questions.length} Interview Questions`} color="var(--cyan)">
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {pack.top_questions.map((q: any, i: number) => (
               <div key={i} style={{ padding:'12px 14px', background:'var(--surface-2)', borderRadius:10, border:'1px solid var(--border)' }}>
@@ -68,7 +68,7 @@ function PrepPack({ data }: { data: any }) {
 
       {/* LeetCode */}
       {pack.leetcode_problems?.length > 0 && (
-        <Section title="🧠 LeetCode Problems" color="var(--amber)">
+        <Section title="LeetCode Problems" color="var(--amber)">
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {pack.leetcode_problems.map((p: any, i: number) => (
               <div key={i} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'var(--surface-2)', borderRadius:10, border:'1px solid var(--border)' }}>
@@ -87,15 +87,15 @@ function PrepPack({ data }: { data: any }) {
 
       {/* DOs & DON'Ts */}
       {(pack.dos?.length > 0 || pack.donts?.length > 0) && (
-        <Section title="✅ DOs & DON'Ts" color="var(--emerald)">
+        <Section title="DOs & DON'Ts" color="var(--emerald)">
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <div>
               <p style={{ fontSize:11, fontWeight:700, color:'var(--emerald)', marginBottom:8, letterSpacing:'0.06em' }}>DOs</p>
-              {(pack.dos||[]).map((d:string,i:number) => <div key={i} style={{ padding:'8px 12px', background:'rgba(16,185,129,0.08)', borderRadius:8, fontSize:12, color:'var(--text-2)', marginBottom:6 }}>✓ {d}</div>)}
+              {(pack.dos||[]).map((d:string,i:number) => <div key={i} style={{ padding:'8px 12px', background:'rgba(16,185,129,0.08)', borderRadius:8, fontSize:12, color:'var(--text-2)', marginBottom:6 }}>+ {d}</div>)}
             </div>
             <div>
               <p style={{ fontSize:11, fontWeight:700, color:'var(--rose)', marginBottom:8, letterSpacing:'0.06em' }}>DON'Ts</p>
-              {(pack.donts||[]).map((d:string,i:number) => <div key={i} style={{ padding:'8px 12px', background:'rgba(244,63,94,0.08)', borderRadius:8, fontSize:12, color:'var(--text-2)', marginBottom:6 }}>✗ {d}</div>)}
+              {(pack.donts||[]).map((d:string,i:number) => <div key={i} style={{ padding:'8px 12px', background:'rgba(244,63,94,0.08)', borderRadius:8, fontSize:12, color:'var(--text-2)', marginBottom:6 }}>- {d}</div>)}
             </div>
           </div>
         </Section>
@@ -103,7 +103,7 @@ function PrepPack({ data }: { data: any }) {
 
       {/* Strategy */}
       {pack.prep_strategy && (
-        <Section title="🎯 Prep Strategy" color="var(--violet-light)">
+        <Section title="Prep Strategy" color="var(--violet-light)">
           {pack.prep_strategy.strategy && <p style={{ fontSize:13, color:'var(--text-2)', lineHeight:1.75, marginBottom:16 }}>{pack.prep_strategy.strategy}</p>}
           {pack.prep_strategy.priority_areas?.length > 0 && (
             <div>
