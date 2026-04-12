@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Brain, Mail, Send, Loader2, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import { analyzeCompany, gmailScan } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { useDebounce } from '../hooks/useDebounce';
 
 function Section({ title, children, color = 'var(--violet-light)' }: { title: string; children: React.ReactNode; color?: string }) {
   const [open, setOpen] = useState(true);
@@ -25,9 +24,11 @@ function Section({ title, children, color = 'var(--violet-light)' }: { title: st
 }
 
 function PrepPack({ data }: { data: any }) {
+  // result might be "Discovery results with injected data" or "directly analyzed result"
   const company = data.company || data.companies?.[0]?.company;
   const role    = data.role    || data.companies?.[0]?.role;
   const pack    = data.top_questions ? data : data.companies?.[0]?.data;
+  
   if (!pack) return null;
 
   return (
@@ -119,31 +120,88 @@ function PrepPack({ data }: { data: any }) {
   );
 }
 
+function DiscoveryCard({ company, role, timeLeft, onAnalyze, loading }: { company: string, role: string, timeLeft: string, onAnalyze: () => void, loading: boolean }) {
+  return (
+    <div className="card" style={{ padding: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, border: '1px solid var(--border-light)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(6,182,212,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Mail size={16} color="var(--cyan)" />
+        </div>
+        <div>
+          <h4 style={{ fontSize: 14, fontWeight: 700 }}>{company}</h4>
+          <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{role} • <span style={{ color: 'var(--cyan)' }}>{timeLeft}</span></p>
+        </div>
+      </div>
+      <button 
+        onClick={onAnalyze} 
+        disabled={loading}
+        className="btn btn-primary" 
+        style={{ padding: '8px 16px', fontSize: 12, borderRadius: 8, height: 'fit-content', gap:8 }}
+      >
+        {loading ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />Generating...</> : 'Generate Prep Pack'}
+      </button>
+    </div>
+  );
+}
+
 export default function CompanyPrep() {
-  const { accessToken } = useAuth();
+  const { accessToken, signInWithGoogle } = useAuth();
   const [text,    setText]     = useState('');
   const [result,  setResult]   = useState<any>(null);
   const [loading, setLoading]  = useState(false);
+  const [generating, setGenerating] = useState<string | null>(null);
   const [mode,    setMode]     = useState<'analyze'|'gmail'>('analyze');
   const [error,   setError]    = useState('');
 
-  const handleAnalyze = async () => {
-    if (!text.trim()) return;
-    setLoading(true); setError(''); setResult(null);
-    try { setResult(await analyzeCompany(text.trim())); }
-    catch (e: any) { const d = e.response?.data?.detail; setError(typeof d === 'string' ? d : d ? JSON.stringify(d) : e.message); }
-    finally { setLoading(false); }
+  const handleAnalyze = async (customText?: string) => {
+    const targetText = customText || text.trim();
+    if (!targetText) return;
+    
+    if (customText) setGenerating(customText);
+    else setLoading(true);
+    
+    setError(''); 
+    try { 
+      const res = await analyzeCompany(targetText); 
+      if (customText) {
+        // Update the list with the generated data
+        setResult((prev: any) => {
+          if (!prev || prev.mode !== 'gmail') return res;
+          return {
+            ...prev,
+            companies: prev.companies.map((c: any) => 
+              (`${c.company} ${c.role}` === customText) ? { ...c, data: res } : c
+            )
+          };
+        });
+      } else {
+        setResult(res); 
+      }
+    }
+    catch (e: any) { setError(e.response?.data?.detail || e.message); }
+    finally { 
+      setLoading(false); 
+      setGenerating(null);
+    }
   };
 
   const handleGmailScan = async () => {
     if (!accessToken) { setError('No Gmail access token. Please sign out and sign in again.'); return; }
     setLoading(true); setError(''); setResult(null);
-    try { setResult(await gmailScan(accessToken)); }
-    catch (e: any) { const d = e.response?.data?.detail; setError(typeof d === 'string' ? d : d ? JSON.stringify(d) : e.message); }
+    try {
+      if (!accessToken) await signInWithGoogle();
+      const res = await gmailScan();
+      setResult(res);
+    }
+    catch (e: any) {
+      const msg = e.response?.data?.detail || e.message;
+      setError(msg);
+      if (e.response?.status === 403 || e.response?.status === 401) {
+        setError('Gmail access denied. Please click "Switch account" to fix permissions.');
+      }
+    }
     finally { setLoading(false); }
   };
-
-  const isMulti = result?.mode === 'email' || result?.mode === 'gmail';
 
   return (
     <div style={{ padding:32, maxWidth:900, margin:'0 auto' }}>
@@ -157,10 +215,9 @@ export default function CompanyPrep() {
             <h2 style={{ fontSize:22 }}>Company Intel & Smart Prep</h2>
           </div>
         </div>
-        <p style={{ fontSize:14, color:'var(--text-2)' }}>Paste a recruitment email or company name → get 10 questions, LeetCode picks, DOs/DON'Ts, and a prep strategy.</p>
+        <p style={{ fontSize:14, color:'var(--text-2)' }}>Discover interview invites from Gmail (Quick Sync) or input a company manually.</p>
       </motion.div>
 
-      {/* Mode tabs */}
       <div className="tabs" style={{ marginBottom:20 }}>
         <button className={`tab ${mode==='analyze'?'active':''}`} onClick={() => setMode('analyze')}>Manual Input</button>
         <button className={`tab ${mode==='gmail'?'active':''}`}   onClick={() => setMode('gmail')}>Gmail Scan</button>
@@ -169,8 +226,8 @@ export default function CompanyPrep() {
       {mode === 'analyze' && (
         <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} className="card" style={{ padding:24, marginBottom:24 }}>
           <p style={{ fontSize:13, color:'var(--text-2)', marginBottom:12 }}>Paste a recruitment email <strong>or</strong> just type: <em style={{ color:'var(--text-3)' }}>"Google SWE 2 weeks"</em></p>
-          <textarea className="input" rows={6} placeholder="Paste email content or type company/role/timeline..." value={text} onChange={e => setText(e.target.value)} style={{ marginBottom:12 }} />
-          <button onClick={handleAnalyze} disabled={loading || !text.trim()} className="btn btn-primary" style={{ gap:8 }}>
+          <textarea className="input" rows={6} placeholder="Paste email content..." value={text} onChange={e => setText(e.target.value)} style={{ marginBottom:12 }} />
+          <button onClick={() => handleAnalyze()} disabled={loading || !text.trim()} className="btn btn-primary" style={{ gap:8 }}>
             {loading ? <><Loader2 size={15} style={{ animation:'spin 1s linear infinite' }} />Analyzing…</> : <><Send size={15} />Analyze</>}
           </button>
         </motion.div>
@@ -181,13 +238,19 @@ export default function CompanyPrep() {
           <div style={{ display:'flex', alignItems:'flex-start', gap:12, marginBottom:20 }}>
             <Mail size={20} color="var(--cyan)" style={{ flexShrink:0, marginTop:2 }} />
             <div>
-              <h4 style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Scan Gmail for Interview Emails</h4>
-              <p style={{ fontSize:13, color:'var(--text-2)' }}>Searches last 60 days for placement/interview emails, extracts all companies, and generates prep packs for each.</p>
+              <h4 style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Quick Gmail Sync</h4>
+              <p style={{ fontSize:13, color:'var(--text-2)' }}>Instantly extracts company names and roles from your latest recruitment emails (~5 seconds).</p>
             </div>
           </div>
-          {!accessToken && <div style={{ padding:'10px 14px', background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:8, fontSize:13, color:'var(--amber)', marginBottom:16 }}>Sign out and sign in again to grant Gmail permission.</div>}
-          <button onClick={handleGmailScan} disabled={loading || !accessToken} className="btn btn-primary" style={{ gap:8 }}>
-            {loading ? <><Loader2 size={15} style={{ animation:'spin 1s linear infinite' }} />Scanning Gmail…</> : <><Mail size={15} />Scan Gmail</>}
+          
+          <button onClick={handleGmailScan} disabled={loading} className="btn btn-primary" style={{ gap:8 }}>
+            {loading ? (
+              <><Loader2 size={15} style={{ animation:'spin 1s linear infinite' }} />Checking Gmail…</>
+            ) : !accessToken ? (
+              <><Mail size={15} />Connect Gmail Account</>
+            ) : (
+              <><Mail size={15} />Scan Inbox</>
+            )}
           </button>
         </motion.div>
       )}
@@ -195,13 +258,41 @@ export default function CompanyPrep() {
       {error && <div style={{ padding:'12px 16px', background:'rgba(244,63,94,0.1)', border:'1px solid rgba(244,63,94,0.25)', borderRadius:10, fontSize:13, color:'var(--rose)', marginBottom:16 }}>{error}</div>}
 
       {result && (
-        isMulti
-          ? (result.companies || []).map((c: any, i: number) => (
-              <div key={i} style={{ marginBottom:24 }}>
-                <PrepPack data={{ ...c, ...c.data }} />
-              </div>
-            ))
-          : <PrepPack data={result} />
+        <AnimatePresence mode="wait">
+          {result.mode === 'gmail' && (
+             <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} style={{ marginBottom:32 }}>
+                {result.companies?.length > 0 ? (
+                  <>
+                    <p style={{ fontSize:11, fontWeight:700, color:'var(--text-3)', marginBottom:12, letterSpacing:'0.05em' }}>
+                      DISCOVERED INVITATIONS ({result.companies.length})
+                    </p>
+                    {result.companies.map((c: any, i: number) => (
+                      <div key={i} style={{ marginBottom: 24 }}>
+                        {c.data ? (
+                          <PrepPack data={c.data} />
+                        ) : (
+                          <DiscoveryCard 
+                            company={c.company} 
+                            role={c.role} 
+                            timeLeft={c.time_left} 
+                            loading={generating === `${c.company} ${c.role}`}
+                            onAnalyze={() => handleAnalyze(`${c.company} ${c.role}`)} 
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                   <div className="card" style={{ padding:32, textAlign:'center', color:'var(--text-3)' }}>
+                      <Mail size={32} style={{ marginBottom:12, opacity:0.3 }} />
+                      <p>{result.message || 'No interview emails found in the last 60 days.'}</p>
+                   </div>
+                )}
+             </motion.div>
+          )}
+
+          {result.mode !== 'gmail' && <PrepPack data={result} />}
+        </AnimatePresence>
       )}
     </div>
   );

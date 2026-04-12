@@ -171,6 +171,7 @@ async def _build_plan_from_groq(sorted_events: List[ScoredEvent]) -> Optional[Da
 async def generate_plan(
     user_id: str = "anonymous",
     google_access_token: Optional[str] = None,
+    suggestion: Optional[str] = None,
 ) -> GeneratePlanResponse:
     """
     Full pipeline:
@@ -197,6 +198,19 @@ async def generate_plan(
     events, raw_profile, hours_studied = await asyncio.gather(
         events_task, profile_task, study_task
     )
+
+    if suggestion:
+        # Inject the manual task as an urgent event happening 'today'.
+        # This guarantees calculation by the PriorityEngine.
+        from models.schemas import EventType
+        events.append(
+            ExtractedEvent(
+                eventType=EventType.assignment,
+                title=f"Manual Task: {suggestion.strip()}",
+                date=today_str[:10],
+                source_email_id="manual_input"
+            )
+        )
 
     student_profile: Optional[StudentProfile] = None
     if raw_profile:

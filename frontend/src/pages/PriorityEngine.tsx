@@ -28,6 +28,7 @@ export default function PriorityEngine() {
   const [hours,   setHours]   = useState('');
   const [subject, setSubject] = useState('');
   const [logDone, setLogDone] = useState(false);
+  const [customPrompt, setCustomPrompt] = useState('');
 
   // Calendar State
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -56,8 +57,13 @@ export default function PriorityEngine() {
   const handleGenerate = async () => {
     if (!accessToken) { setError('No Gmail access token. Sign out and sign in again, granting Google Calendar & Gmail permissions.'); return; }
     setLoading(true); setError(''); setPlan(null);
-    try { const data = await generatePlan(accessToken); setPlan(data); }
-    catch (e: any) { const d = e.response?.data?.detail; setError(typeof d === 'string' ? d : d ? JSON.stringify(d) : e.message); }
+    try { 
+      const data = await generatePlan(customPrompt); 
+      setPlan(data); 
+    }
+    catch (e: any) { 
+      setError(e.response?.data?.detail || e.message); 
+    }
     finally { setLoading(false); }
   };
 
@@ -145,9 +151,19 @@ export default function PriorityEngine() {
                 <Mail size={16} color="var(--cyan)" />
                 <h3 style={{ fontSize:15, fontWeight:600 }}>Generate Today's Plan</h3>
               </div>
-              <p style={{ fontSize:13, color:'var(--text-2)', marginBottom:20 }}>
+              <p style={{ fontSize:13, color:'var(--text-2)', marginBottom:16 }}>
                 Scans recent emails · Priority-scored · Firestore cached
               </p>
+              <div style={{ marginBottom: 16 }}>
+                <textarea 
+                  className="input" 
+                  placeholder="Add custom priorities or instructions (e.g., 'Focus heavily on AWS today', 'Prepare for mock interviews')" 
+                  value={customPrompt} 
+                  onChange={e => setCustomPrompt(e.target.value)} 
+                  rows={2} 
+                  style={{ width: '100%', resize: 'vertical', fontSize: 13 }} 
+                />
+              </div>
               {!accessToken && (
                 <div style={{ padding:'10px 14px', background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:8, marginBottom:16, fontSize:13, color:'var(--amber)', display:'flex', gap:8, alignItems:'center' }}>
                   <AlertTriangle size={14} /> Sign in with Google with Gmail permissions to use this feature.

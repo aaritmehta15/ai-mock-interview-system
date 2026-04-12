@@ -198,6 +198,10 @@ async def generate_plan(
         min_length=1,
         max_length=128,
     ),
+    suggestion: Optional[str] = Query(
+        default=None,
+        description="A manual task or priority suggestion provided by the user.",
+    ),
 ) -> GeneratePlanResponse:
     """
     Full pipeline:
@@ -224,6 +228,7 @@ async def generate_plan(
         return await planner_service.generate_plan(
             user_id=user_id,
             google_access_token=google_access_token,
+            suggestion=suggestion,
         )
     except Exception as exc:
         logger.exception("Unhandled error in /generate-plan: %s", exc)

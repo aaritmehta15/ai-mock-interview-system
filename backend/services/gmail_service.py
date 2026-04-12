@@ -51,7 +51,8 @@ logger = logging.getLogger(__name__)
 _GMAIL_BASE    = "https://gmail.googleapis.com/gmail/v1/users/me"
 _GMAIL_QUERY   = (
     "subject:(placement OR drive OR aptitude OR exam OR internship "
-    "OR assignment OR quiz OR deadline OR shortlist OR offer)"
+    "OR assignment OR quiz OR deadline OR shortlist OR offer "
+    "OR test OR hackerrank OR assessment OR oa OR interview)"
 )
 
 

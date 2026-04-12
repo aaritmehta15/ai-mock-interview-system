@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from groq import AsyncGroq
 import asyncio
 
+from dotenv import load_dotenv
 load_dotenv()
 
 # Use AsyncGroq for non-blocking calls

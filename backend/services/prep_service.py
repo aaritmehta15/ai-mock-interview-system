@@ -342,20 +342,32 @@ async def handle_email_mode(info: dict) -> dict:
     if not companies_data:
         return {"mode": "email", "companies": []}
 
-    results = []
-    for entry in companies_data:
-        company   = entry.get("company", "Unknown")
-        role      = entry.get("role", "Software Engineer")
+    async def _safe_generate(entry: dict):
+        company = entry.get("company", "Unknown")
+        role = entry.get("role", "Software Engineer")
         time_left = entry.get("time_left", "Not specified")
+        
+        try:
+            data = await generate_company_data(company, role, time_left)
+            return {
+                "company": company,
+                "role": role,
+                "time_left": time_left,
+                "data": data,
+            }
+        except Exception as e:
+            print(f"[ERROR] Parallel prep generation failed for {company}: {e}")
+            return {
+                "company": company,
+                "role": role,
+                "time_left": time_left,
+                "data": None,
+                "error": str(e)
+            }
 
-        data = await generate_company_data(company, role, time_left)
-
-        results.append({
-            "company":   company,
-            "role":      role,
-            "time_left": time_left,
-            "data":      data,
-        })
+    # Run prep generation for up to 3 companies in parallel
+    tasks = [_safe_generate(entry) for entry in companies_data]
+    results = await asyncio.gather(*tasks)
 
     return {"mode": "email", "companies": results}
 
@@ -441,20 +453,11 @@ async def gmail_scan(access_token: str) -> dict:
             seen.add(key)
             unique_companies.append(c)
 
-    # Step 4: Generate prep data for each company
-    # PERFORMANCE OPTIMIZATION: Limit to top 3 companies during Gmail scan
-    # generating full prep packs is LLM-intensive (4 calls per company).
-    original_count = len(unique_companies)
-    if original_count > 3:
-        print(f"[GMAIL] Capping results to top 3 (out of {original_count}) to prevent timeout.")
-        info["companies"] = unique_companies[:3]
-
-    result = await handle_email_mode(info)
-    result["mode"] = "gmail"
-    result["emails_scanned"] = len(emails)
-    
-    if original_count > 3:
-        result["message"] = f"Found {original_count} companies. Showing prep packs for the top 3 to keep it fast. Analyze others manually above!"
-    
-    return result
+    # Return discovery results immediately for 'Very Quick' sync
+    return {
+        "mode": "gmail",
+        "companies": unique_companies,
+        "emails_scanned": len(emails),
+        "message": f"Discovered {len(unique_companies)} placement/interview invitations. Click 'Generate' to see the prep packs!"
+    }
 

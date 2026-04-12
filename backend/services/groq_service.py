@@ -51,6 +51,15 @@ def sanitize_email_text(text: str) -> str:
 # Core HTTP helper
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─── Shared Client ────────────────────────────────────────────────────────────
+_client: httpx.AsyncClient | None = None
+
+async def get_groq_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(timeout=60.0)
+    return _client
+
 async def _call_groq(
     messages: list[dict],
     *,
@@ -61,9 +70,8 @@ async def _call_groq(
 ) -> Optional[str]:
     """
     Send a chat completion request to Groq and return the assistant's text.
-    Returns None on unrecoverable failure so callers can degrade gracefully.
+    Uses a shared httpx client for connection pooling.
     """
-    # Always read from env at call time — never cached — so .env loaded late still works
     api_key = os.environ.get("GROQ_API_KEY", "").strip()
     if not api_key:
         logger.error("GROQ_API_KEY is not set — Groq call skipped.")
@@ -83,12 +91,13 @@ async def _call_groq(
     if response_format:
         payload["response_format"] = response_format
 
+    client = await get_groq_client()
+
     for attempt, delay in enumerate([0.0] + _RETRY_DELAYS, start=1):
         if delay:
             await asyncio.sleep(delay)
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(_GROQ_URL, headers=headers, json=payload)
+            resp = await client.post(_GROQ_URL, headers=headers, json=payload)
 
             if resp.status_code == 200:
                 return resp.json()["choices"][0]["message"]["content"]

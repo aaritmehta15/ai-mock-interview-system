@@ -13,8 +13,10 @@ export function clearAuthToken() {
 }
 
 // ── Module 1 — Smart Priority Engine ────────────────────────────────────────
-export const generatePlan = () =>
-  api.get('/generate-plan').then(r => r.data);
+export const generatePlan = (suggestion?: string) => {
+  const url = suggestion ? `/generate-plan?suggestion=${encodeURIComponent(suggestion)}` : '/generate-plan';
+  return api.get(url).then(r => r.data);
+};
 
 export const logStudy = (payload: { userId: string; date: string; hours: number; subject?: string }) =>
   api.post('/log-study', { user_id: payload.userId, date: payload.date, hours_studied: payload.hours, subject: payload.subject }).then(r => r.data);
