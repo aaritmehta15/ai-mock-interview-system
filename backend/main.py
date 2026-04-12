@@ -127,7 +127,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if APP_ENV == "development" else [],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -580,9 +580,14 @@ class ChatRequest(BaseModel):
     questions: list[str]
     asked_questions: list[str] = []   # track what's been asked to prevent repeats
 
+class FeedbackDetail(BaseModel):
+    good: str = ""
+    missing: str = ""
+    improve: str = ""
+
 class ChatResponse(BaseModel):
     reply: str
-    feedback: str
+    feedback: Optional[FeedbackDetail] = None
     next_question: str
 
 
@@ -1151,6 +1156,10 @@ async def gmail_scan_endpoint(request: Request, body: Optional[GmailScanRequest]
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Any, exc: Exception) -> JSONResponse:
+    if isinstance(exc, HTTPException):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        
     logger.exception("Unhandled exception on %s: %s", request.url, exc)
     return JSONResponse(
         status_code=500,

@@ -1,10 +1,6 @@
 import json
 import os
-from groq import Groq
 from dotenv import load_dotenv
-
-load_dotenv()
-
 from groq import AsyncGroq
 import asyncio
 
@@ -27,7 +23,7 @@ INTERVIEW RULES — never break these:
 2. After each candidate answer, give SPECIFIC structured feedback (2-3 sentences max, no fluff)
 3. Stay 100% on topic — this is a {role} interview at {company}. Politely refuse off-topic requests
 4. Remember EVERYTHING the candidate has said in this conversation
-5. Feedback MUST use this exact structure: "Good: ... | Missing: ... | Improve: ..."
+5. After the FIRST candidate answer and every subsequent one, feedback MUST be returned as a JSON object with keys: good, missing, improve. On the very FIRST message (greeting only, no answer yet), set feedback to null
 6. NEVER ask any question from the ALREADY ASKED list below — this is STRICTLY FORBIDDEN
 7. Never break character. Never reveal you are an AI or a language model
 8. Keep your tone professional, direct, and warm — like a real senior interviewer
@@ -41,9 +37,14 @@ ALREADY ASKED — DO NOT REPEAT THESE:
 RESPONSE FORMAT — always return valid JSON, no markdown, no extra text:
 {{
   "reply": "Your conversational response as Alex",
-  "feedback": "Structured feedback: Good: <what worked> | Missing: <what was absent> | Improve: <specific advice> — empty string on the very first question",
+  "feedback": {{
+    "good": "<what worked well>",
+    "missing": "<what was absent>",
+    "improve": "<specific advice to improve>"
+  }},
   "next_question": "Next question from the bank that is NOT in the already-asked list — empty string only when all questions are done"
-}}"""
+}}
+Note: If this is the very first question and you have no feedback yet, set 'feedback' to null."""
 
 
 async def _run_groq(messages: list[dict], max_tokens: int = 600) -> str:
@@ -108,7 +109,7 @@ async def chat(
     parsed = await _safe_json_call(messages)
     return {
         "reply":         parsed.get("reply", ""),
-        "feedback":      parsed.get("feedback", ""),
+        "feedback":      parsed.get("feedback", None),
         "next_question": parsed.get("next_question", ""),
     }
 
