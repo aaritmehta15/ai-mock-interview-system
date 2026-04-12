@@ -54,14 +54,10 @@ export default function PriorityEngine() {
   }, [activeTab, accessToken]);
 
   const handleGenerate = async () => {
+    if (!accessToken) { setError('No Gmail access token. Sign out and sign in again, granting Google Calendar & Gmail permissions.'); return; }
     setLoading(true); setError(''); setPlan(null);
-    try { 
-      const data = await generatePlan(); 
-      setPlan(data); 
-    }
-    catch (e: any) { 
-      setError(e.response?.data?.detail || e.message); 
-    }
+    try { const data = await generatePlan(accessToken); setPlan(data); }
+    catch (e: any) { const d = e.response?.data?.detail; setError(typeof d === 'string' ? d : d ? JSON.stringify(d) : e.message); }
     finally { setLoading(false); }
   };
 
@@ -71,7 +67,7 @@ export default function PriorityEngine() {
       await logStudy({ userId: user.uid, date: new Date().toISOString().slice(0,10), hours: Number(hours), subject });
       setLogDone(true); setHours(''); setSubject('');
       setTimeout(() => setLogDone(false), 3000);
-    } catch (e: any) { setError(e.response?.data?.detail || e.message); }
+    } catch (e: any) { const d = e.response?.data?.detail; setError(typeof d === 'string' ? d : d ? JSON.stringify(d) : e.message); }
   };
 
   // Calendar render helpers

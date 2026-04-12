@@ -17,7 +17,7 @@ export const generatePlan = () =>
   api.get('/generate-plan').then(r => r.data);
 
 export const logStudy = (payload: { userId: string; date: string; hours: number; subject?: string }) =>
-  api.post('/log-study', payload).then(r => r.data);
+  api.post('/log-study', { user_id: payload.userId, date: payload.date, hours_studied: payload.hours, subject: payload.subject }).then(r => r.data);
 
 export const getProfile = (userId: string) =>
   api.get(`/profile/${userId}`).then(r => r.data);
