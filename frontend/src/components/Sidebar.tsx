@@ -14,7 +14,7 @@ const nav = [
   { to: '/interview',  icon: Mic,             label: 'Mock Interview' },
   { to: '/prep',       icon: Brain,           label: 'Company Prep' },
   { to: '/apply',      icon: FileSearch,      label: 'Auto Apply' },
-  { to: '/mission',    icon: Award,           label: 'Mission Control' },
+  { to: '/mission',    icon: Award,           label: 'Interview Arena' },
 ];
 
 export default function Sidebar() {
@@ -25,17 +25,23 @@ export default function Sidebar() {
 
   const handleLogout = async () => { await logout(); navigate('/'); };
 
+  const initials = user?.displayName
+    ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    : user?.email?.[0].toUpperCase() || 'U';
+
   return (
     <aside className="sidebar">
       {/* Logo */}
       <div style={{ padding: '20px 16px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 40 }}>
           <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 16 }}>
-            AM
+            {initials}
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 2 }}>WELCOME BACK</div>
-            <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0, letterSpacing: '-0.02em', color: 'var(--text)' }}>Aarit Mehta</h1>
+            <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0, letterSpacing: '-0.02em', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 }}>
+              {user?.displayName?.split(' ')[0] || 'User'}
+            </h1>
           </div>
         </div>
       </div>

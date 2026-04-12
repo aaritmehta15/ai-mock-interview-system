@@ -44,7 +44,7 @@ from models.schemas import (
     UpdateProfileRequest,
     UploadResumeResponse,
 )
-from services import apply_service, firebase_service, planner_service, resume_service, study_service, mission_control_service
+from services import apply_service, firebase_service, planner_service, resume_service, study_service, mission_control_service, war_room_service
 
 # ─── Module 2: Voice Interview imports ───────────────────────────────────────
 from scraper import scrape_questions
@@ -770,6 +770,55 @@ async def sync_mission_control(request: Request, user_id: str):
     except Exception as exc:
         logger.exception("Failed /mission-control/sync: %s", exc)
         raise HTTPException(status_code=500, detail="Sync failed.")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module 7: The War Room
+# ─────────────────────────────────────────────────────────────────────────────
+class WarRoomGenerateRequest(BaseModel):
+    company: str
+    role: str
+
+class WarRoomEvaluateRequest(BaseModel):
+    company: str
+    aptitude_score: int
+    total_aptitude: int
+    coding_problem: str
+    code: str
+    explanation: str
+
+@app.post(
+    "/api/war-room/generate",
+    summary="Generate War Room Assessment",
+    tags=["War Room"],
+    status_code=status.HTTP_200_OK,
+)
+async def generate_war_room(req: WarRoomGenerateRequest):
+    if not req.company or not req.role:
+        raise HTTPException(status_code=400, detail="company and role are required")
+    try:
+        data = await war_room_service.generate_war_room_tasks(req.company, req.role)
+        if not data:
+            raise HTTPException(status_code=500, detail="Failed to generate tasks.")
+        return data
+    except Exception as exc:
+        logger.exception("Failed /api/war-room/generate: %s", exc)
+        raise HTTPException(status_code=500, detail="Generation failed.")
+
+@app.post(
+    "/api/war-room/evaluate",
+    summary="Evaluate War Room Assessment",
+    tags=["War Room"],
+    status_code=status.HTTP_200_OK,
+)
+async def evaluate_war_room(req: WarRoomEvaluateRequest):
+    try:
+        data = await war_room_service.evaluate_war_room(req.model_dump())
+        if not data:
+            raise HTTPException(status_code=500, detail="Failed to evaluate.")
+        return data
+    except Exception as exc:
+        logger.exception("Failed /api/war-room/evaluate: %s", exc)
+        raise HTTPException(status_code=500, detail="Evaluation failed.")
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 

@@ -134,24 +134,61 @@ def extract_json(text: str) -> Any:
     # 1. Fenced code block (```json … ```)
     m = re.search(r"```(?:json)?\s*([\[\{].*?)```", text, re.DOTALL)
     if m:
+        content = m.group(1)
         try:
-            return json.loads(m.group(1))
+            return json.loads(content)
         except json.JSONDecodeError:
-            pass
+            cleaned = _clean_llm_json(content)
+            try:
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                pass
 
     # 2. First JSON-looking substring
     m = re.search(r"([\[\{].*[\]\}])", text, re.DOTALL)
     if m:
+        content = m.group(1)
         try:
-            return json.loads(m.group(1))
+            return json.loads(content)
         except json.JSONDecodeError:
-            pass
+            cleaned = _clean_llm_json(content)
+            try:
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                pass
 
     # 3. Entire string
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        return None
+        cleaned = _clean_llm_json(text)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            return None
+
+
+def _clean_llm_json(text: str) -> str:
+    """
+    Heuristically fix common LLM JSON errors:
+    - Replace backticks used for multi-line strings with escaped double quotes
+    - Remove trailing commas before closing braces/brackets
+    """
+    # 1. Replace backticks used as string delimiters: "key": `value` -> "key": "value"
+    # This also attempts to escape newlines inside the content for valid JSON
+    def backtick_replacer(match):
+        prefix = match.group(1)
+        content = match.group(2)
+        # Escape double quotes and newlines in the content
+        content = content.replace('"', '\\"').replace("\n", "\\n")
+        return f'{prefix}"{content}"'
+
+    text = re.sub(r'(:\s*)`([\s\S]*?)`', backtick_replacer, text)
+
+    # 2. Remove trailing commas in objects/arrays
+    text = re.sub(r",\s*([\]\}])", r"\1", text)
+
+    return text
 
 
 # ─────────────────────────────────────────────────────────────────────────────

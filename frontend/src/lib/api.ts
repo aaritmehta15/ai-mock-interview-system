@@ -85,6 +85,13 @@ export const getMissionControlStatus = (userId: string) =>
 export const syncMissionControl = (userId: string) =>
   api.post(`/mission-control/sync/${userId}`, {}).then(r => r.data);
 
+// ── Module 7 — Interview Arena ──────────────────────────────────────────
+export const generateWarRoom = (company: string, role: string) =>
+  api.post('/api/war-room/generate', { company, role }).then(r => r.data);
+
+export const evaluateWarRoom = (payload: object) =>
+  api.post('/api/war-room/evaluate', payload).then(r => r.data);
+
 // ── Health ───────────────────────────────────────────────────────────────────
 export const health = () => api.get('/health').then(r => r.data);
 
