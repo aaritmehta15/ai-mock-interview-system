@@ -1,20 +1,15 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Zap, Mic, Brain, FileSearch,
-  LogOut, ChevronRight, Award, User, Sun, Moon
+  LayoutDashboard, Mic,
+  LogOut, ChevronRight, Sun, Moon
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
 const nav = [
   { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/profile',    icon: User,            label: 'Profile' },
-  { to: '/priority',   icon: Zap,             label: 'Priority Engine' },
   { to: '/interview',  icon: Mic,             label: 'Mock Interview' },
-  { to: '/prep',       icon: Brain,           label: 'Company Prep' },
-  { to: '/apply',      icon: FileSearch,      label: 'Auto Apply' },
-  { to: '/mission',    icon: Award,           label: 'Interview Arena' },
 ];
 
 export default function Sidebar() {

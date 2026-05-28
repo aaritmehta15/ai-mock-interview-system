@@ -7,6 +7,7 @@ import random
 from dotenv import load_dotenv
 from groq import AsyncGroq
 import asyncio
+from fastapi import HTTPException
 
 from dotenv import load_dotenv
 load_dotenv()

@@ -1,4 +1,4 @@
-# ── Secrets & credentials ─────────────────────────────────────────────────────
+# ── Secrets & credentials — NEVER COMMIT THESE ──────────────────────────────
 .env
 .env.*
 !.env.example
@@ -6,6 +6,8 @@ firebase_credentials.json
 *.pem
 *.key
 service_account*.json
+*credentials*.json
+*secret*.json
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
@@ -33,6 +35,10 @@ package-lock.json
 .pnp/
 .pnp.js
 
+# ── Build output ──────────────────────────────────────────────────────────────
+frontend/dist/
+frontend/build/
+
 # ── IDE / Editor ──────────────────────────────────────────────────────────────
 .vscode/
 .idea/
@@ -48,6 +54,10 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# ── Uploads (temp resume files) ───────────────────────────────────────────────
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+backend_output.log
+
+# ── Uploads (temp files) ──────────────────────────────────────────────────────
 backend/uploads/
 uploads/

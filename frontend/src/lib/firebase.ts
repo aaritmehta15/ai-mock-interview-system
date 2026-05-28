@@ -16,11 +16,3 @@ export const auth     = getAuth(app);
 export const db       = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
-
-// Request Gmail read scope for Priority Engine + Company Prep
-googleProvider.addScope('https://www.googleapis.com/auth/gmail.readonly');
-// Google Calendar read scope for calendar view
-googleProvider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-// Google Classroom scope to read courses/assignments
-googleProvider.addScope('https://www.googleapis.com/auth/classroom.courses.readonly');
-googleProvider.addScope('https://www.googleapis.com/auth/classroom.coursework.me.readonly');
