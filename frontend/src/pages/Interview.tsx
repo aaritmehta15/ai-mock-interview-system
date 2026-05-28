@@ -100,18 +100,18 @@ export default function Interview() {
   const [asked,      setAsked]      = useState<string[]>([]);
   const [summary,    setSummary]    = useState<any>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  // Improvement 2: separate finalized transcript from interim (no React flicker)
-  const [finalText,  setFinalText]  = useState('');
+  const [liveText,   setLiveText]   = useState('');   // live transcript shown during recording
+  const [finalText,  setFinalText]  = useState('');   // finalized text shown in processing state
 
   const synthRef  = useRef(window.speechSynthesis);
-  const recRef    = useRef<any>(null);
-  const histRef   = useRef<any[]>([]);
-  const questRef  = useRef<string[]>([]);
-  const askedRef  = useRef<string[]>([]);
-  const accRef    = useRef('');
-  const sendRef   = useRef<((s: string) => void) | null>(null);
-  // Improvement 2: direct DOM write for interim transcript — avoids React rerender on every word
-  const liveSpanRef = useRef<HTMLSpanElement>(null);
+  const recRef          = useRef<any>(null);
+  const histRef         = useRef<any[]>([]);
+  const questRef        = useRef<string[]>([]);
+  const askedRef        = useRef<string[]>([]);
+  const accRef          = useRef('');
+  const sendRef         = useRef<((s: string) => void) | null>(null);
+  const liveSpanRef     = useRef<HTMLSpanElement>(null);   // kept for DOM writes (secondary)
+  const isRecordingRef  = useRef(false);                  // true = user is actively recording
 
   useEffect(() => { histRef.current  = history;   }, [history]);
   useEffect(() => { questRef.current = questions; }, [questions]);
@@ -137,8 +137,8 @@ export default function Interview() {
 
   const sendMessage = async (msg: string) => {
     setState('processing');
+    setLiveText('');
     setFinalText('');
-    // Clear live span
     if (liveSpanRef.current) liveSpanRef.current.textContent = '';
 
     const h  = histRef.current;
@@ -180,7 +180,7 @@ export default function Interview() {
   };
   sendRef.current = sendMessage;
 
-  // Improvement 2: mic recording — direct DOM for interim, React state only for finalized text
+  // Build a SpeechRecognition instance with auto-restart and live transcript
   const initRec = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
@@ -191,6 +191,7 @@ export default function Interview() {
     rec.continuous     = true;
     rec.interimResults = true;
     rec.lang           = 'en-US';
+    rec.maxAlternatives = 1;
 
     rec.onresult = (e: any) => {
       let interim = '';
@@ -201,24 +202,42 @@ export default function Interview() {
           interim = e.results[i][0].transcript;
         }
       }
-      // Write directly to DOM — zero React rerender, zero flicker
-      if (liveSpanRef.current) {
-        liveSpanRef.current.textContent = accRef.current + interim || 'Speak now…';
-      }
+      const combined = accRef.current + interim;
+      // Primary: React state (reliable, always visible)
+      setLiveText(combined);
+      // Secondary: DOM write (zero-lag visual update)
+      if (liveSpanRef.current) liveSpanRef.current.textContent = combined;
     };
 
     rec.onend = () => {
+      // If user hasn't clicked Stop, auto-restart (browser fires onend on every silence pause)
+      if (isRecordingRef.current) {
+        try {
+          rec.start();
+          return; // still recording — don't send yet
+        } catch {
+          // start() failed (already started or other error) — fall through
+        }
+      }
+      // User clicked Stop OR restart failed — finalise and send
+      isRecordingRef.current = false;
       const s = accRef.current.trim();
       setFinalText(s);
+      setLiveText('');
       if (s) sendRef.current?.(s);
       else setState('interviewing');
     };
 
-    // Improvement 6: explicit mic-denied error state
     rec.onerror = (e: any) => {
       if (e.error === 'not-allowed' || e.error === 'permission-denied') {
+        isRecordingRef.current = false;
         setState('mic-denied');
-      } else if (e.error !== 'no-speech') {
+      } else if (e.error === 'no-speech') {
+        // No-speech fires on silence pauses — do NOT stop, auto-restart handles it
+      } else if (e.error === 'aborted') {
+        // Aborted fires when we call rec.stop() deliberately — handled in onend
+      } else {
+        isRecordingRef.current = false;
         setState('interviewing');
       }
     };
@@ -247,20 +266,43 @@ export default function Interview() {
   };
 
   const startListening = () => {
+    // Reset state
     accRef.current = '';
+    setLiveText('');
     setFinalText('');
-    if (liveSpanRef.current) liveSpanRef.current.textContent = 'Speak now…';
-    const rec = initRec();
-    if (!rec) return;
-    recRef.current = rec;
+    isRecordingRef.current = true;
+
+    // Set listening state FIRST so the transcript span renders
     setState('listening');
-    rec.start();
+
+    // Small delay: let React render the listening UI (span, mic button) before starting
+    setTimeout(() => {
+      if (!isRecordingRef.current) return; // was cancelled before timeout
+      const rec = initRec();
+      if (!rec) {
+        isRecordingRef.current = false;
+        setState('interviewing');
+        return;
+      }
+      recRef.current = rec;
+      try {
+        rec.start();
+      } catch (err) {
+        console.error('[voice] rec.start() failed:', err);
+        isRecordingRef.current = false;
+        setState('interviewing');
+      }
+    }, 150);
   };
 
-  const stopListening = () => recRef.current?.stop();
+  const stopListening = () => {
+    isRecordingRef.current = false;  // signal that this is an intentional stop
+    recRef.current?.stop();
+  };
 
   const handleSummary = async () => {
     synthRef.current.cancel();
+    isRecordingRef.current = false;
     recRef.current?.stop();
     setState('summarising');
     try {
@@ -277,6 +319,7 @@ export default function Interview() {
 
   const handleContinue = () => {
     setFeedback(null);
+    setLiveText('');
     setFinalText('');
     setShowDims(false);
     if (liveSpanRef.current) liveSpanRef.current.textContent = '';
@@ -288,9 +331,10 @@ export default function Interview() {
   const reset = () => {
     synthRef.current.cancel();
     recRef.current?.stop();
+    isRecordingRef.current = false;
     setHistory([]); setQuestions([]); setAsked([]);
     setFeedback(null); setSummary(null);
-    setCurrentQ(''); setFinalText('');
+    setCurrentQ(''); setLiveText(''); setFinalText('');
     setError(''); setState('idle'); setShowDims(false);
     if (liveSpanRef.current) liveSpanRef.current.textContent = '';
   };
@@ -615,19 +659,21 @@ export default function Interview() {
                   </div>
                 )}
 
-                {/* Improvement 2: live transcript box — DOM-driven, zero React flicker */}
+                {/* Live transcript — React state primary, DOM ref secondary */}
                 <div style={{
                   width: '100%', padding: 16,
                   background: 'var(--surface-2)', borderRadius: 10,
-                  border: '1px solid var(--border)', minHeight: 72,
+                  border: '1px solid var(--border)', minHeight: 80,
                 }}>
                   <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Your answer — live transcript
                   </p>
                   <span
                     ref={liveSpanRef}
-                    style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7 }}
-                  >Speak now…</span>
+                    style={{ fontSize: 13, color: liveText ? 'var(--text)' : 'var(--text-3)', lineHeight: 1.7 }}
+                  >
+                    {liveText || 'Speak now… your words will appear here'}
+                  </span>
                 </div>
               </motion.div>
             )}
