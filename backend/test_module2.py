@@ -95,7 +95,7 @@ async def run_all_tests():
 
     print(f"\n=== RESULTS: {passed} PASSED, {failed} FAILED ===")
     if failed == 0:
-        print("ALL TESTS PASSED ✅")
+        print("ALL TESTS PASSED - OK")
     else:
         print("SOME TESTS FAILED ❌")
 

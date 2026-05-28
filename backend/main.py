@@ -136,15 +136,29 @@ class ChatRequest(BaseModel):
     questions: list[str]
     asked_questions: list[str] = []   # track what's been asked to prevent repeats
 
+class DimensionScore(BaseModel):
+    score: int = 0
+    evidence: str = ""
+    note: str = ""
+
 class FeedbackDetail(BaseModel):
+    # Core fields — always present (backward-compatible with frontend)
     good: str = ""
     missing: str = ""
     improve: str = ""
+    # Dimension scores from Layer 4 evaluation rubric (new)
+    technical_accuracy: Optional[DimensionScore] = None
+    depth: Optional[DimensionScore] = None
+    communication: Optional[DimensionScore] = None
+    completeness: Optional[DimensionScore] = None
 
 class ChatResponse(BaseModel):
     reply: str
     feedback: Optional[FeedbackDetail] = None
     next_question: str
+    # New fields from 6-layer architecture (ignored by old frontend code)
+    probe_followup: Optional[str] = None
+    interview_stage: Optional[str] = None
 
 
 class ImprovementArea(BaseModel):
@@ -158,6 +172,10 @@ class QuestionReview(BaseModel):
     what_was_good: str
     what_was_missing: str
     model_answer_hint: str
+    # New evidence fields from two-pass summary architecture
+    competency_tested: Optional[str] = None
+    key_evidence: Optional[str] = None
+    scores: Optional[dict] = None
 
 class SummaryRequest(BaseModel):
     user_id: str = "anonymous"
