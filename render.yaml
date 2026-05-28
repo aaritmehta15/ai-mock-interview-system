@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: ai-mock-interview-backend
+    env: python
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false          # you paste this in Render dashboard
+      - key: FIREBASE_CREDENTIALS_JSON
+        sync: false          # paste contents of firebase_credentials.json here
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO

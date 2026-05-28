@@ -67,15 +67,40 @@ _executor  = ThreadPoolExecutor(max_workers=4, thread_name_prefix="firestore")
 
 def _try_init_firestore() -> None:
     """
-    Only initialise firebase_admin when a valid credentials FILE exists.
-    We validate the file is JSON before touching the firebase_admin SDK
-    so a stale global app from another project can't pollute our client.
+    Initialise firebase_admin from either:
+      1. FIREBASE_CREDENTIALS_JSON env var (JSON string) — used on Render/Railway
+      2. A credentials FILE on disk — used locally
+
+    Falls back to in-memory store if neither is available.
     """
     global _db
+    import json
 
+    # ── Option A: credentials from environment variable (cloud deployment) ─
+    creds_json_str = os.environ.get("FIREBASE_CREDENTIALS_JSON", "").strip()
+    if creds_json_str:
+        try:
+            creds_data = json.loads(creds_json_str)
+            if "project_id" not in creds_data:
+                logger.warning("FIREBASE_CREDENTIALS_JSON missing 'project_id' — using in-memory store.")
+            else:
+                import firebase_admin                                # type: ignore
+                from firebase_admin import credentials, firestore   # type: ignore
+                for stale in list(firebase_admin._apps.values()):
+                    try: firebase_admin.delete_app(stale)
+                    except Exception: pass
+                firebase_admin.initialize_app(credentials.Certificate(creds_data))
+                _db = firestore.client()
+                logger.info("Firestore ready via env var (project=%s).", creds_data.get("project_id"))
+                return
+        except Exception as exc:
+            logger.error("Firestore init from env var failed (%s) — using in-memory store.", exc)
+            _db = None
+            return
+
+    # ── Option B: credentials from file (local dev) ────────────────────────
     creds_path = os.path.abspath(FIREBASE_CREDENTIALS_FILE)
 
-    # ── Gate 1: file must exist ────────────────────────────────────────────
     if not os.path.isfile(creds_path):
         logger.warning(
             "Firestore: credentials file '%s' not found — using in-memory store.",
@@ -83,15 +108,12 @@ def _try_init_firestore() -> None:
         )
         return
 
-    # ── Gate 2: file must look like valid JSON ─────────────────────────────
-    import json
     try:
         with open(creds_path) as f:
             creds_data = json.load(f)
         if "project_id" not in creds_data:
             logger.warning(
-                "Firestore: '%s' does not look like a service-account key "
-                "(missing 'project_id') — using in-memory store.",
+                "Firestore: '%s' does not look like a service-account key — using in-memory store.",
                 creds_path,
             )
             return
@@ -99,22 +121,16 @@ def _try_init_firestore() -> None:
         logger.warning("Firestore: could not read credentials file: %s", exc)
         return
 
-    # ── Only reached when we have a real project key ───────────────────────
     try:
         import firebase_admin                                # type: ignore
         from firebase_admin import credentials, firestore   # type: ignore
-
-        # Delete every stale app unconditionally so we start clean
         for stale in list(firebase_admin._apps.values()):
-            try:
-                firebase_admin.delete_app(stale)
-            except Exception:
-                pass
-
+            try: firebase_admin.delete_app(stale)
+            except Exception: pass
         firebase_admin.initialize_app(credentials.Certificate(creds_path))
         _db = firestore.client()
         logger.info(
-            "Firestore ready (project=%s).",
+            "Firestore ready via file (project=%s).",
             creds_data.get("project_id", FIREBASE_PROJECT_ID or "?"),
         )
     except Exception as exc:
