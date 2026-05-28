@@ -180,18 +180,17 @@ export default function Interview() {
   };
   sendRef.current = sendMessage;
 
-  // Build a SpeechRecognition instance with auto-restart and live transcript
+  // Build SpeechRecognition — simple and reliable
   const initRec = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
-      alert('Voice recognition requires Chrome or Edge — other browsers not supported.');
+      alert('Voice recognition requires Chrome or Edge.');
       return null;
     }
     const rec = new SR();
     rec.continuous     = true;
     rec.interimResults = true;
     rec.lang           = 'en-US';
-    rec.maxAlternatives = 1;
 
     rec.onresult = (e: any) => {
       let interim = '';
@@ -203,25 +202,22 @@ export default function Interview() {
         }
       }
       const combined = accRef.current + interim;
-      // Primary: React state (reliable, always visible)
+      console.log('[voice] transcript:', combined.substring(0, 80));
       setLiveText(combined);
-      // Secondary: DOM write (zero-lag visual update)
       if (liveSpanRef.current) liveSpanRef.current.textContent = combined;
     };
 
     rec.onend = () => {
-      // If user hasn't clicked Stop, auto-restart (browser fires onend on every silence pause)
+      console.log('[voice] onend fired, isRecording:', isRecordingRef.current);
       if (isRecordingRef.current) {
-        try {
-          rec.start();
-          return; // still recording — don't send yet
-        } catch {
-          // start() failed (already started or other error) — fall through
-        }
+        // Browser auto-stopped (silence/timeout) — restart silently
+        console.log('[voice] auto-restarting...');
+        try { rec.start(); return; } catch (e) { console.log('[voice] restart failed:', e); }
       }
-      // User clicked Stop OR restart failed — finalise and send
+      // Intentional stop or restart failed
       isRecordingRef.current = false;
       const s = accRef.current.trim();
+      console.log('[voice] finalizing:', s.substring(0, 80));
       setFinalText(s);
       setLiveText('');
       if (s) sendRef.current?.(s);
@@ -229,20 +225,44 @@ export default function Interview() {
     };
 
     rec.onerror = (e: any) => {
-      if (e.error === 'not-allowed' || e.error === 'permission-denied') {
+      console.log('[voice] error:', e.error);
+      if (e.error === 'not-allowed') {
         isRecordingRef.current = false;
         setState('mic-denied');
-      } else if (e.error === 'no-speech') {
-        // No-speech fires on silence pauses — do NOT stop, auto-restart handles it
-      } else if (e.error === 'aborted') {
-        // Aborted fires when we call rec.stop() deliberately — handled in onend
-      } else {
-        isRecordingRef.current = false;
-        setState('interviewing');
       }
+      // no-speech and aborted are harmless — auto-restart handles them
     };
 
     return rec;
+  };
+
+  const startListening = () => {
+    console.log('[voice] startListening called');
+    accRef.current = '';
+    setLiveText('');
+    setFinalText('');
+    isRecordingRef.current = true;
+
+    const rec = initRec();
+    if (!rec) return;
+    recRef.current = rec;
+    setState('listening');
+
+    // Start immediately — don't wait for React render
+    try {
+      rec.start();
+      console.log('[voice] rec.start() OK');
+    } catch (err) {
+      console.error('[voice] rec.start() failed:', err);
+      isRecordingRef.current = false;
+      setState('interviewing');
+    }
+  };
+
+  const stopListening = () => {
+    console.log('[voice] stopListening called');
+    isRecordingRef.current = false;
+    recRef.current?.stop();
   };
 
   const handleScrape = async () => {
@@ -265,40 +285,8 @@ export default function Interview() {
     sendMessage('Hello, I am ready to begin the interview.');
   };
 
-  const startListening = () => {
-    // Reset state
-    accRef.current = '';
-    setLiveText('');
-    setFinalText('');
-    isRecordingRef.current = true;
 
-    // Set listening state FIRST so the transcript span renders
-    setState('listening');
 
-    // Small delay: let React render the listening UI (span, mic button) before starting
-    setTimeout(() => {
-      if (!isRecordingRef.current) return; // was cancelled before timeout
-      const rec = initRec();
-      if (!rec) {
-        isRecordingRef.current = false;
-        setState('interviewing');
-        return;
-      }
-      recRef.current = rec;
-      try {
-        rec.start();
-      } catch (err) {
-        console.error('[voice] rec.start() failed:', err);
-        isRecordingRef.current = false;
-        setState('interviewing');
-      }
-    }, 150);
-  };
-
-  const stopListening = () => {
-    isRecordingRef.current = false;  // signal that this is an intentional stop
-    recRef.current?.stop();
-  };
 
   const handleSummary = async () => {
     synthRef.current.cancel();
