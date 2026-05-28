@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mic, ArrowRight, Calendar, ShieldCheck } from 'lucide-react';
