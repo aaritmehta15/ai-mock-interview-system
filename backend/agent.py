@@ -27,39 +27,26 @@ from livekit.agents import (
     cli,
 )
 from services.ledger_service import ledger_service
-from services.blueprint_service import get_blueprint, InterviewBlueprint
+from orchestrator.personas import (
+    get_persona,
+    compile_persona_instructions,
+    PersonaProfile,
+    ALEX_EMPATHETIC_LEAD,
+)
 
-def build_system_instructions(bp: InterviewBlueprint = None) -> str:
-    """Build grounded, role-specific system prompt from the active Interview Blueprint."""
-    if not bp:
-        return (
-            "You are DAAZLING, an expert AI Technical Interviewer at a premier technology company. "
-            "Your demeanor is calm, encouraging, and rigorous. "
-            "Conduct a structured technical interview. Ask questions one at a time. "
-            "Listen closely to the candidate's answers, acknowledge them concisely, and ask thoughtful follow-ups "
-            "if an answer is too brief or misses key architectural trade-offs."
-        )
+def build_system_instructions(bp: InterviewBlueprint = None, persona: PersonaProfile = None) -> str:
+    """Build grounded, persona-steered system prompt from active Blueprint."""
+    active_persona = persona or ALEX_EMPATHETIC_LEAD
+    if bp:
+        return compile_persona_instructions(active_persona, bp)
 
-    q_list = "\n".join([f"{i+1}. {q.text} (Competency: {q.competency})" for i, q in enumerate(bp.questions)])
-    kw_list = ", ".join(bp.keywords) if bp.keywords else "System Architecture, Data Structures, Scalability"
+    return f"""
+{active_persona.system_tone_prompt}
 
-    return f"""You are DAAZLING, an expert AI Technical Interviewer conducting a {bp.seniority} {bp.role} interview for {bp.company}.
-Your goal is to thoroughly assess the candidate's engineering depth and communication skills while keeping the conversation natural, encouraging, and realistic.
-
-BLUEPRINT QUESTIONS TO COVER:
-{q_list}
-
-KEY TECHNICAL DOMAINS & KEYWORDS:
-{kw_list}
-
-INTERVIEW BEHAVIOR GUIDELINES:
-1. Greet the candidate warmly and introduce yourself as DAAZLING, their technical interviewer for today.
-2. Introduce Question 1 first. Let them answer fully before moving forward.
-3. If their answer is vague or misses core trade-offs, ask a single targeted follow-up probe.
-4. If their answer is thorough, acknowledge it with a brief encouraging remark and transition smoothly to the next question.
-5. NEVER monologue. Keep your conversational responses concise (1 to 3 sentences maximum) before turning the floor back to the candidate.
-6. Maintain a supportive yet rigorous tone throughout.
-"""
+You are {active_persona.name}, {active_persona.title} ({active_persona.archetype}).
+Conduct a structured technical interview assessing systems and architecture.
+Ask questions one at a time. Keep spoken turns concise (under 40 words).
+""".strip()
 
 async def entrypoint(ctx: JobContext):
     logger.info("[agent] Worker joining job %s in room %s", ctx.job.id, ctx.room.name)
@@ -72,7 +59,19 @@ async def entrypoint(ctx: JobContext):
     else:
         logger.info("[agent] No pre-registered blueprint found for session %s; using standard engineering prompt", session_id)
 
-    instructions = build_system_instructions(bp)
+    # Determine persona from room metadata or fallback to Alex
+    persona_id = "alex"
+    try:
+        if ctx.room.metadata:
+            import json
+            meta = json.loads(ctx.room.metadata)
+            persona_id = meta.get("persona_id", "alex")
+    except Exception:
+        pass
+
+    persona = get_persona(persona_id)
+    logger.info("[agent] Active persona configured: %s (%s) with difficulty=%s", persona.name, persona.title, persona.difficulty)
+    instructions = build_system_instructions(bp, persona)
     gemini_key = os.getenv("GEMINI_API_KEY")
     deepgram_key = os.getenv("DEEPGRAM_API_KEY")
 
@@ -148,8 +147,8 @@ async def entrypoint(ctx: JobContext):
     
     # Send warm opening greeting
     greeting_text = (
-        f"Hi {participant.name or 'there'}! Welcome to your interview. I'm DAAZLING, your AI interviewer. "
-        "Whenever you're ready, let me know and we'll dive right into the first question."
+        f"Hi {participant.name or 'there'}! I'm {persona.name}, {persona.title}. "
+        "Welcome to your technical session. Whenever you're ready, let me know and we'll dive right into our first question."
     )
     try:
         await session.say(greeting_text)

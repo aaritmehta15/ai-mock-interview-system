@@ -20,6 +20,7 @@ Docs:
 """
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -119,6 +120,7 @@ class TokenRequest(BaseModel):
     room_name: str
     participant_name: str
     identity: Optional[str] = None
+    persona_id: Optional[str] = "alex"
 
 class TokenResponse(BaseModel):
     token: str
@@ -131,6 +133,49 @@ class BlueprintRequest(BaseModel):
     resume_text: str = ""
     jd_text: str = ""
     session_id: Optional[str] = None
+    persona_id: Optional[str] = "alex"
+
+class StepTurnRequest(BaseModel):
+    session_id: str
+    blueprint_id: str
+    persona_id: str = "alex"
+    candidate_utterance: str
+    current_question_index: int = 0
+    current_probe_count: int = 0
+    max_probes_per_question: int = 2
+    questions_total: int = 3
+
+@app.get(
+    "/api/personas",
+    summary="List all calibrated interviewer personas",
+    tags=["Orchestrator & Personas"],
+)
+async def list_personas_endpoint():
+    from orchestrator.personas import list_personas
+    return list_personas()
+
+@app.post(
+    "/api/orchestrator/step",
+    summary="Step LangGraph conversational state machine with candidate utterance",
+    tags=["Orchestrator & Personas"],
+)
+async def step_turn_endpoint(req: StepTurnRequest):
+    from orchestrator.state_graph import step_interview_turn
+    try:
+        res = step_interview_turn(
+            session_id=req.session_id,
+            blueprint_id=req.blueprint_id,
+            persona_id=req.persona_id,
+            candidate_utterance=req.candidate_utterance,
+            current_question_index=req.current_question_index,
+            current_probe_count=req.current_probe_count,
+            max_probes_per_question=req.max_probes_per_question,
+            questions_total=req.questions_total,
+        )
+        return res
+    except Exception as e:
+        logger.error("[orchestrator] Error stepping turn: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post(
     "/api/token",
@@ -150,11 +195,13 @@ async def generate_livekit_token(req: TokenRequest):
         )
 
     identity = req.identity or f"cand_{req.participant_name.lower().replace(' ', '_')}_{os.urandom(3).hex()}"
-    
+    metadata_json = json.dumps({"persona_id": req.persona_id or "alex"})
+
     token = (
         livekit_api.AccessToken(api_key, api_secret)
         .with_identity(identity)
         .with_name(req.participant_name)
+        .with_metadata(metadata_json)
         .with_grants(
             livekit_api.VideoGrants(
                 room_join=True,
