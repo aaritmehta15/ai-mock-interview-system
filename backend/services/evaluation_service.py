@@ -23,7 +23,7 @@ from services.ledger_service import ledger_service, TurnEvent
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-_groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+_groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"), max_retries=1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dossier Data Models
@@ -127,9 +127,10 @@ Do not wrap with backticks or Markdown. Output raw JSON array only.
 """
 
     models_to_try = [
-        os.getenv("GROQ_CLASSIFY_MODEL", "qwen/qwen3.8-27b"),
+        os.getenv("GROQ_CLASSIFY_MODEL", "groq/compound-mini"),
+        "groq/compound-mini",
         "qwen/qwen3.8-27b",
-        "llama-3.3-70b-versatile",
+        "groq/compound",
     ]
 
     for model in models_to_try:
@@ -138,7 +139,7 @@ Do not wrap with backticks or Markdown. Output raw JSON array only.
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=1024,
+                max_tokens=512,
             )
             raw = response.choices[0].message.content.strip()
             # Strip potential code fence
