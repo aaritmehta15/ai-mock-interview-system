@@ -209,6 +209,21 @@ async def get_blueprint_endpoint(session_id: str):
     return bp
 
 
+@app.post(
+    "/api/evaluate/{session_id}",
+    summary="Generate evidence-grounded performance dossier from Turn Ledger",
+    tags=["LiveKit WebRTC Gateway"],
+)
+async def evaluate_session_endpoint(session_id: str):
+    from services.evaluation_service import generate_interview_dossier
+    try:
+        dossier = await generate_interview_dossier(session_id)
+        return dossier
+    except Exception as e:
+        logger.error("[evaluation] Error generating dossier for %s: %s", session_id, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Module 2 — Voice Mock Interview System
