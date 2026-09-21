@@ -130,6 +130,7 @@ class BlueprintRequest(BaseModel):
     seniority: str = "Mid-Level"
     resume_text: str = ""
     jd_text: str = ""
+    session_id: Optional[str] = None
 
 @app.post(
     "/api/token",
@@ -177,6 +178,7 @@ async def generate_livekit_token(req: TokenRequest):
 )
 async def create_blueprint_endpoint(req: BlueprintRequest):
     try:
+        from services.blueprint_service import save_blueprint
         bp = await generate_blueprint(
             company=req.company,
             role=req.role,
@@ -184,10 +186,27 @@ async def create_blueprint_endpoint(req: BlueprintRequest):
             jd_text=req.jd_text,
             seniority=req.seniority,
         )
+        save_blueprint(bp.blueprint_id, bp)
+        if req.session_id:
+            save_blueprint(req.session_id, bp)
         return bp
     except Exception as e:
         logger.error("[blueprint] Error generating blueprint: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/blueprint/{session_id}",
+    response_model=InterviewBlueprint,
+    summary="Retrieve an active Interview Blueprint by session or blueprint ID",
+    tags=["LiveKit WebRTC Gateway"],
+)
+async def get_blueprint_endpoint(session_id: str):
+    from services.blueprint_service import get_blueprint
+    bp = get_blueprint(session_id)
+    if not bp:
+        raise HTTPException(status_code=404, detail=f"Blueprint for '{session_id}' not found.")
+    return bp
 
 
 

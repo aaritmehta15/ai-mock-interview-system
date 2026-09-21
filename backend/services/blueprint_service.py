@@ -23,6 +23,19 @@ logger = logging.getLogger(__name__)
 
 _groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
+# In-memory blueprint store (keyed by session_id and blueprint_id)
+_blueprint_store: dict[str, InterviewBlueprint] = {}
+
+def save_blueprint(session_id: str, blueprint: InterviewBlueprint) -> None:
+    """Store blueprint associated with a session or blueprint ID."""
+    _blueprint_store[session_id] = blueprint
+    _blueprint_store[blueprint.blueprint_id] = blueprint
+    logger.info("[blueprint] Stored blueprint %s for session %s", blueprint.blueprint_id, session_id)
+
+def get_blueprint(session_id: str) -> Optional[InterviewBlueprint]:
+    """Retrieve blueprint by session_id or blueprint_id."""
+    return _blueprint_store.get(session_id)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Blueprint Data Models
 # ─────────────────────────────────────────────────────────────────────────────

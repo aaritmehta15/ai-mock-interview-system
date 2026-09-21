@@ -16,3 +16,17 @@ firebase-admin>=6.5.0
 groq>=0.9.0
 # HTML scraping for interview question harvesting
 beautifulsoup4>=4.12.3
+
+# ── LiveKit Realtime WebRTC & Multimodal Audio ─────────────────────────────────
+livekit>=1.1.18
+livekit-api>=1.2.0
+livekit-agents>=1.8.2
+livekit-plugins-google>=1.8.2
+livekit-plugins-deepgram>=1.8.2
+livekit-plugins-silero>=1.8.2
+livekit-plugins-openai>=1.8.2
+
+# ── Resume Parsing & AI Synthesis ─────────────────────────────────────────────
+pypdf>=5.0.0
+google-genai>=2.24.0
+python-multipart>=0.0.9

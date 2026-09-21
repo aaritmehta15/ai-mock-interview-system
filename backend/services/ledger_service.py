@@ -31,8 +31,18 @@ class TurnEvent(BaseModel):
     candidate_audio_duration_ms: int = 0
     interviewer_reply: str = ""
     interviewer_action: str = "advance_question"
+    speaker: str = "candidate"
+    role: str = "candidate"
     timestamp_utc: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     is_completed: bool = True
+
+    @property
+    def word_count(self) -> int:
+        return len(self.candidate_transcript.split())
+
+    @property
+    def text(self) -> str:
+        return self.candidate_transcript if self.role == "candidate" else self.interviewer_reply
 
 class InterviewSession(BaseModel):
     session_id: str = Field(default_factory=lambda: f"sess_{uuid.uuid4().hex[:12]}")
@@ -62,19 +72,40 @@ def get_session(session_id: str) -> Optional[InterviewSession]:
 
 def record_turn(
     session_id: str,
-    question_id: str,
-    question_text: str,
-    candidate_transcript: str,
+    question_id: str = "q_active",
+    question_text: str = "",
+    candidate_transcript: str = "",
     audio_duration_ms: int = 0,
     interviewer_reply: str = "",
-    action: str = "advance_question"
+    action: str = "advance_question",
+    speaker: str = "candidate",
+    role: str = "candidate",
+    text: str = "",
+    confidence: float = 1.0,
 ) -> TurnEvent:
     """
     Append an immutable turn event to the session ledger.
+    Auto-initializes session if not already registered.
     """
     session = _registry.get(session_id)
     if not session:
-        raise ValueError(f"Session {session_id} not found in ledger")
+        from services.blueprint_service import get_blueprint, _build_fallback_blueprint
+        bp = get_blueprint(session_id) or _build_fallback_blueprint("Tech Company", "Software Engineer", "Mid-Level")
+        session = create_session(bp, session_id=session_id)
+
+    # Normalize text input from agent callbacks
+    if text:
+        if role in ("candidate", "user"):
+            candidate_transcript = text
+        else:
+            interviewer_reply = text
+
+    # Associate with current question if not explicitly provided
+    if (not question_text or question_text == "") and session.blueprint.questions:
+        curr_idx = min(session.current_question_index, len(session.blueprint.questions) - 1)
+        active_q = session.blueprint.questions[curr_idx]
+        question_id = active_q.id
+        question_text = active_q.text
 
     event = TurnEvent(
         session_id=session_id,
@@ -84,16 +115,24 @@ def record_turn(
         candidate_audio_duration_ms=audio_duration_ms,
         interviewer_reply=interviewer_reply.strip(),
         interviewer_action=action,
+        speaker=speaker,
+        role=role,
         is_completed=bool(candidate_transcript.strip())
     )
     session.turns.append(event)
-    logger.info("[ledger] Recorded turn %s (Q: %s, Candidate chars: %d)", event.turn_id, question_id, len(event.candidate_transcript))
+    logger.info("[ledger] Recorded turn %s (Q: %s, Speaker: %s, Words: %d)",
+                event.turn_id, question_id, speaker or role, len(event.candidate_transcript.split()))
     return event
+
+def get_session_turns(session_id: str) -> List[TurnEvent]:
+    """Retrieve all turns for a session."""
+    session = _registry.get(session_id)
+    return session.turns if session else []
 
 def get_verified_turns(session_id: str) -> List[TurnEvent]:
     """
     MATHEMATICAL GROUND TRUTH GUARANTEE:
-    Returns ONLY turn events that have non-empty candidate transcripts.
+    Returns ONLY turn events that have non-empty candidate transcripts with >= 3 words.
     Unasked or aborted turns are excluded by construction.
     """
     session = _registry.get(session_id)
@@ -125,3 +164,15 @@ def complete_session(session_id: str) -> Optional[InterviewSession]:
         session.status = "completed"
         logger.info("[ledger] Session %s marked as completed. Total turns: %d", session_id, len(session.turns))
     return session
+
+
+class LedgerService:
+    create_session = staticmethod(create_session)
+    get_session = staticmethod(get_session)
+    record_turn = staticmethod(record_turn)
+    get_session_turns = staticmethod(get_session_turns)
+    get_verified_turns = staticmethod(get_verified_turns)
+    get_unreached_questions = staticmethod(get_unreached_questions)
+    complete_session = staticmethod(complete_session)
+
+ledger_service = LedgerService()
