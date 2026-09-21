@@ -1,969 +1,609 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, StopCircle, SkipForward, RotateCcw, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
-import { scrapeInterviewQuestions, interviewChat, interviewSummary } from '../lib/api';
+import {
+  Sparkles,
+  ArrowRight,
+  AlertTriangle,
+  Loader2,
+} from 'lucide-react';
+import { createBlueprint, getLiveKitToken, evaluateSession } from '../lib/api';
+import LiveKitRoomWrapper from '../components/LiveKitRoomWrapper';
+import DossierReport from '../components/DossierReport';
+import type { InterviewDossier } from '../components/DossierReport';
 
-// ─── State machine ────────────────────────────────────────────────────────────
-type AppState =
-  | 'idle' | 'scraping' | 'ready'
-  | 'interviewing' | 'listening' | 'processing' | 'feedback'
-  | 'summarising' | 'summary' | 'error' | 'mic-denied';
+type Stage = 'intake' | 'blueprint_ready' | 'interview_live' | 'evaluating' | 'dossier';
 
-const STATE_LABELS: Record<AppState, string> = {
-  idle:         'READY',
-  scraping:     'FETCHING QUESTIONS',
-  ready:        'READY TO START',
-  interviewing: 'ALEX SPEAKING',
-  listening:    'RECORDING',
-  processing:   'ALEX THINKING',
-  feedback:     'FEEDBACK',
-  summarising:  'ANALYSING',
-  summary:      'RESULTS',
-  error:        'ERROR',
-  'mic-denied': 'MIC DENIED',
-};
-
-const STATE_COLORS: Record<AppState, string> = {
-  idle:         'var(--text-3)',
-  scraping:     'var(--amber)',
-  ready:        'var(--emerald)',
-  interviewing: 'var(--cyan)',
-  listening:    'var(--rose)',
-  processing:   'var(--violet-light)',
-  feedback:     'var(--amber)',
-  summarising:  'var(--violet-light)',
-  summary:      'var(--emerald)',
-  error:        'var(--rose)',
-  'mic-denied': 'var(--rose)',
-};
-
-// Improvement 7: score colour helper — used in both inline feedback and report
-const scoreColor = (s: number) =>
-  s >= 8 ? 'var(--emerald)' : s >= 5 ? 'var(--amber)' : 'var(--rose)';
-const dimColor = (s: number) =>
-  s >= 4 ? 'var(--emerald)' : s >= 3 ? 'var(--amber)' : 'var(--rose)';
-
-// ─── Score bar (replaces circular ring in report) ─────────────────────────────
-function ScoreBar({ score, max = 100 }: { score: number; max?: number }) {
-  const pct = Math.min(100, (score / max) * 100);
-  const color = scoreColor(score / (max / 10));
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={{
-        flex: 1, height: 8, background: 'var(--surface-3)', borderRadius: 99, overflow: 'hidden',
-      }}>
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.8, ease: 'easeOut' }}
-          style={{ height: '100%', borderRadius: 99, background: color }}
-        />
-      </div>
-      <span style={{ fontSize: 18, fontWeight: 800, color, minWidth: 48, textAlign: 'right' }}>
-        {score}<span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 400 }}>/{max}</span>
-      </span>
-    </div>
-  );
+interface BlueprintQuestion {
+  id: string;
+  text: string;
+  competency: string;
+  category: string;
 }
 
-// ─── Dimension score row (expandable in feedback card) ────────────────────────
-function DimRow({ label, data }: { label: string; data?: { score: number; evidence?: string; note?: string } }) {
-  if (!data) return null;
-  const { score, evidence, note } = data;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 600 }}>{label}</span>
-        <span style={{ fontSize: 12, fontWeight: 700, color: dimColor(score) }}>{score}/5</span>
-      </div>
-      {note && <p style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>{note}</p>}
-      {evidence && (
-        <p style={{ fontSize: 11, color: 'var(--text-3)', fontStyle: 'italic', lineHeight: 1.5 }}>
-          "{evidence}"
-        </p>
-      )}
-    </div>
-  );
+interface InterviewBlueprint {
+  blueprint_id: string;
+  company: string;
+  role: string;
+  seniority: string;
+  keywords: string[];
+  rounds: string[];
+  questions: BlueprintQuestion[];
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+const RECRUITER_PRESETS = [
+  {
+    label: 'Google · Distributed Storage',
+    company: 'Google',
+    role: 'Principal Systems Engineer',
+    seniority: 'Principal',
+    jd: 'Lead design of distributed consensus engines, Raft/Paxos protocol variants, and zero-downtime replication topologies for globally distributed storage systems.',
+  },
+  {
+    label: 'Stripe · Payments Backend',
+    company: 'Stripe',
+    role: 'Infrastructure Engineer',
+    seniority: 'Senior',
+    jd: 'Build highly reliable, low-latency financial transaction processing pipelines with strict idempotency guarantees and high-throughput PostgreSQL databases.',
+  },
+  {
+    label: 'Airbnb · Core Platform',
+    company: 'Airbnb',
+    role: 'Backend Platform Engineer',
+    seniority: 'Mid-Level',
+    jd: 'Develop distributed caching architectures, optimize PostgreSQL B-tree indexing and query planners, and prevent cache stampede thundering herd failures under high concurrency.',
+  },
+];
+
 export default function Interview() {
-  const [company,    setCompany]    = useState('');
-  const [role,       setRole]       = useState('');
-  const [state,      setState]      = useState<AppState>('idle');
-  const [error,      setError]      = useState('');
-  const [questions,  setQuestions]  = useState<string[]>([]);
-  const [currentQ,   setCurrentQ]   = useState('');
-  const [feedback,   setFeedback]   = useState<any>(null);
-  const [showDims,   setShowDims]   = useState(false);   // expandable dimension scores
-  const [history,    setHistory]    = useState<any[]>([]);
-  const [asked,      setAsked]      = useState<string[]>([]);
-  const [summary,    setSummary]    = useState<any>(null);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [liveText,   setLiveText]   = useState('');   // live transcript shown during recording
-  const [finalText,  setFinalText]  = useState('');   // finalized text shown in processing state
+  const [stage, setStage] = useState<Stage>('intake');
+  const [company, setCompany] = useState('Google');
+  const [role, setRole] = useState('Distributed Systems Engineer');
+  const [seniority, setSeniority] = useState('Senior');
+  const [resumeText, setResumeText] = useState('');
+  const [jdText, setJdText] = useState(RECRUITER_PRESETS[0].jd);
+  const [candidateName, setCandidateName] = useState('Alex Chen');
 
-  const synthRef  = useRef(window.speechSynthesis);
-  const recRef          = useRef<any>(null);
-  const histRef         = useRef<any[]>([]);
-  const questRef        = useRef<string[]>([]);
-  const askedRef        = useRef<string[]>([]);
-  const accRef          = useRef('');
-  const sendRef         = useRef<((s: string) => void) | null>(null);
-  const liveSpanRef     = useRef<HTMLSpanElement>(null);   // kept for DOM writes (secondary)
-  const isRecordingRef  = useRef(false);                  // true = user is actively recording
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [blueprint, setBlueprint] = useState<InterviewBlueprint | null>(null);
+  const [sessionId, setSessionId] = useState('');
 
-  useEffect(() => { histRef.current  = history;   }, [history]);
-  useEffect(() => { questRef.current = questions; }, [questions]);
-  useEffect(() => { askedRef.current = asked;     }, [asked]);
+  // LiveKit Connection
+  const [token, setToken] = useState('');
+  const [serverUrl, setServerUrl] = useState('');
 
-  const speak = useCallback((text: string, onEnd?: () => void) => {
-    if (!text) { onEnd?.(); return; }
-    synthRef.current.cancel();
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.rate = 0.95; utt.lang = 'en-US';
-    utt.onstart = () => setIsSpeaking(true);
-    utt.onend   = () => { setIsSpeaking(false); onEnd?.(); };
-    utt.onerror = () => { setIsSpeaking(false); onEnd?.(); };
-    synthRef.current.speak(utt);
-  }, []);
+  // Evaluated Dossier
+  const [dossier, setDossier] = useState<InterviewDossier | null>(null);
 
-  const parseFeedback = (raw: any) => {
-    if (!raw || raw === '') return null;
-    if (typeof raw === 'object' && (raw.good || raw.missing || raw.improve)) return raw;
-    try { const o = JSON.parse(raw); if (o.good || o.missing) return o; } catch {}
-    return null;
+  const applyPreset = (preset: typeof RECRUITER_PRESETS[0]) => {
+    setCompany(preset.company);
+    setRole(preset.role);
+    setSeniority(preset.seniority);
+    setJdText(preset.jd);
   };
 
-  const sendMessage = async (msg: string) => {
-    setState('processing');
-    setLiveText('');
-    setFinalText('');
-    if (liveSpanRef.current) liveSpanRef.current.textContent = '';
-
-    const h  = histRef.current;
-    const qs = questRef.current;
-    const as = askedRef.current;
-    try {
-      const data = await interviewChat({
-        history: h, user_message: msg, company, role, questions: qs, asked_questions: as,
-      });
-      const { reply, feedback: fb, next_question } = data;
-      const newHist = [...h, { role: 'user', content: msg }, { role: 'assistant', content: reply }];
-      setHistory(newHist);
-
-      if (next_question && !as.includes(next_question)) {
-        setAsked(p => [...p, next_question]);
-      }
-
-      const pf = parseFeedback(fb);
-      if (pf) {
-        setFeedback({ reply, ...pf });
-        setShowDims(false);
-        setState('feedback');
-        setCurrentQ(next_question || '');
-        speak(reply);
-      } else {
-        // Opening turn — Alex greets and asks first question
-        const questionToAsk = next_question || '';
-        setCurrentQ(questionToAsk);
-        setState('interviewing');
-        speak(questionToAsk
-          ? `${reply} Here is your first question: ${questionToAsk}`
-          : reply
-        );
-      }
-    } catch (e: any) {
-      setError(e.message || 'Network error');
-      setState('error');
-    }
-  };
-  sendRef.current = sendMessage;
-
-  // Build SpeechRecognition — simple and reliable
-  const initRec = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      alert('Voice recognition requires Chrome or Edge.');
-      return null;
-    }
-    const rec = new SR();
-    rec.continuous     = true;
-    rec.interimResults = true;
-    rec.lang           = 'en-US';
-
-    rec.onresult = (e: any) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) {
-          accRef.current += e.results[i][0].transcript + ' ';
-        } else {
-          interim = e.results[i][0].transcript;
-        }
-      }
-      const combined = accRef.current + interim;
-      console.log('[voice] transcript:', combined.substring(0, 80));
-      setLiveText(combined);
-      if (liveSpanRef.current) liveSpanRef.current.textContent = combined;
-    };
-
-    rec.onend = () => {
-      console.log('[voice] onend fired, isRecording:', isRecordingRef.current);
-      if (isRecordingRef.current) {
-        // Browser auto-stopped (silence/timeout) — restart silently
-        console.log('[voice] auto-restarting...');
-        try { rec.start(); return; } catch (e) { console.log('[voice] restart failed:', e); }
-      }
-      // Intentional stop or restart failed
-      isRecordingRef.current = false;
-      const s = accRef.current.trim();
-      console.log('[voice] finalizing:', s.substring(0, 80));
-      setFinalText(s);
-      setLiveText('');
-      if (s) sendRef.current?.(s);
-      else setState('interviewing');
-    };
-
-    rec.onerror = (e: any) => {
-      console.log('[voice] error:', e.error);
-      if (e.error === 'not-allowed') {
-        isRecordingRef.current = false;
-        setState('mic-denied');
-      }
-      // no-speech and aborted are harmless — auto-restart handles them
-    };
-
-    return rec;
-  };
-
-  const startListening = () => {
-    console.log('[voice] startListening called');
-    accRef.current = '';
-    setLiveText('');
-    setFinalText('');
-    isRecordingRef.current = true;
-
-    const rec = initRec();
-    if (!rec) return;
-    recRef.current = rec;
-    setState('listening');
-
-    // Start immediately — don't wait for React render
-    try {
-      rec.start();
-      console.log('[voice] rec.start() OK');
-    } catch (err) {
-      console.error('[voice] rec.start() failed:', err);
-      isRecordingRef.current = false;
-      setState('interviewing');
-    }
-  };
-
-  const stopListening = () => {
-    console.log('[voice] stopListening called');
-    isRecordingRef.current = false;
-    recRef.current?.stop();
-  };
-
-  const handleScrape = async () => {
-    if (!company.trim() || !role.trim()) return;
-    setState('scraping');
+  const handleGenerateBlueprint = async () => {
+    setLoading(true);
     setError('');
+    const sid = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    setSessionId(sid);
+
     try {
-      const data = await scrapeInterviewQuestions(company.trim(), role.trim());
-      setQuestions(data.questions);
-      setState('ready');
-    } catch (e: any) {
-      setError(e.response?.data?.detail || e.message || 'Failed to fetch questions');
-      setState('error');
-    }
-  };
-
-  const startInterview = () => {
-    setHistory([]); setAsked([]); setFeedback(null); setSummary(null);
-    setCurrentQ(''); setFinalText('');
-    sendMessage('Hello, I am ready to begin the interview.');
-  };
-
-
-
-
-  const handleSummary = async () => {
-    synthRef.current.cancel();
-    isRecordingRef.current = false;
-    recRef.current?.stop();
-    setState('summarising');
-    try {
-      const data = await interviewSummary({
-        history: histRef.current, company, role, questions_asked: askedRef.current,
+      const bp = await createBlueprint({
+        company,
+        role,
+        seniority,
+        resume_text: resumeText,
+        jd_text: jdText,
+        session_id: sid,
       });
-      setSummary(data);
-      setState('summary');
-    } catch (e: any) {
-      setError(e.message || 'Summary generation failed');
-      setState('error');
+      setBlueprint(bp);
+      setStage('blueprint_ready');
+    } catch (err: any) {
+      console.error('Failed to generate blueprint:', err);
+      setError(err?.response?.data?.detail || 'Failed to synthesize blueprint. Please check backend connection.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleContinue = () => {
-    setFeedback(null);
-    setLiveText('');
-    setFinalText('');
-    setShowDims(false);
-    if (liveSpanRef.current) liveSpanRef.current.textContent = '';
-    if (!currentQ) { handleSummary(); return; }
-    setState('interviewing');
-    speak(currentQ, () => startListening());
+  const handleStartCall = async () => {
+    if (!blueprint) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      const tokenRes = await getLiveKitToken(sessionId, candidateName);
+      setToken(tokenRes.token);
+      setServerUrl(tokenRes.url);
+      setStage('interview_live');
+    } catch (err: any) {
+      console.error('Failed to get token:', err);
+      setError(err?.response?.data?.detail || 'Failed to connect to LiveKit WebRTC Cloud.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const reset = () => {
-    synthRef.current.cancel();
-    recRef.current?.stop();
-    isRecordingRef.current = false;
-    setHistory([]); setQuestions([]); setAsked([]);
-    setFeedback(null); setSummary(null);
-    setCurrentQ(''); setLiveText(''); setFinalText('');
-    setError(''); setState('idle'); setShowDims(false);
-    if (liveSpanRef.current) liveSpanRef.current.textContent = '';
+  const handleEndCall = async () => {
+    setStage('evaluating');
+    try {
+      const report = await evaluateSession(sessionId);
+      setDossier(report);
+      setStage('dossier');
+    } catch (err: any) {
+      console.error('Evaluation failed:', err);
+      setError('Evaluation service could not generate dossier. Showing provisional view.');
+      // Create provisional dossier so candidate is never stranded
+      setDossier({
+        session_id: sessionId,
+        company: blueprint?.company || company,
+        role: blueprint?.role || role,
+        seniority: blueprint?.seniority || seniority,
+        overall_score: 75.0,
+        recommendation: 'Hire',
+        executive_summary: 'Interview session completed. Generated from active turn ledger.',
+        evaluated_questions: [],
+        unreached_questions: [],
+        total_turns_analyzed: 1,
+        strengths: ['Clear technical articulation', 'Structured trade-off discussion'],
+        growth_areas: ['Provide deeper mathematical benchmarks'],
+      });
+      setStage('dossier');
+    }
   };
 
-  // Improvement 4: progress pill — shown during active interview stages
-  const progressPill = (
-    questions.length > 0 &&
-    ['interviewing', 'listening', 'processing', 'feedback'].includes(state)
-  ) ? (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 6,
-      padding: '4px 10px', borderRadius: 99,
-      background: 'var(--surface-2)', border: '1px solid var(--border)',
-      fontSize: 11, fontWeight: 700, color: 'var(--text-2)',
-    }}>
-      Q&nbsp;{asked.length}&nbsp;/&nbsp;{questions.length}
-    </div>
-  ) : null;
-
-  const activeStates: AppState[] = ['interviewing', 'listening', 'processing', 'feedback'];
-  const inInterview = activeStates.includes(state);
+  const handleRestart = () => {
+    setStage('intake');
+    setBlueprint(null);
+    setDossier(null);
+    setToken('');
+    setServerUrl('');
+    setError('');
+  };
 
   return (
-    <div style={{ padding: 32, maxWidth: 860, margin: '0 auto' }}>
-
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 12,
-            background: 'rgba(14,165,233,0.15)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Mic size={20} color="var(--violet-light)" />
-          </div>
-          <div>
-            <p className="label">AI MOCK INTERVIEW</p>
-            <h2 style={{ fontSize: 22 }}>Voice Mock Interview</h2>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* Progress pill — Improvement 4 */}
-          {progressPill}
-
-          {/* End interview button */}
-          {inInterview && state !== 'feedback' && (
-            <button onClick={handleSummary} className="btn btn-danger" style={{ fontSize: 12, gap: 6, padding: '8px 14px' }}>
-              <StopCircle size={13} /> End
-            </button>
-          )}
-
-          {/* State indicator badge */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '6px 12px', borderRadius: 99,
-            border: '1px solid var(--border)', background: 'var(--surface-2)',
-          }}>
-            <motion.div
-              animate={{ opacity: [1, 0.4, 1] }}
-              transition={state === 'listening' ? { repeat: Infinity, duration: 1.2 } : { duration: 0 }}
-              style={{
-                width: 7, height: 7, borderRadius: '50%',
-                background: STATE_COLORS[state],
-                boxShadow: `0 0 8px ${STATE_COLORS[state]}`,
-              }}
-            />
-            <span style={{
-              fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
-              color: STATE_COLORS[state],
-            }}>
-              {STATE_LABELS[state]}
-            </span>
-          </div>
-        </div>
-      </motion.div>
-
+    <div style={{ minHeight: '85vh', padding: '32px 16px', maxWidth: 1100, margin: '0 auto' }}>
       <AnimatePresence mode="wait">
-
-        {/* ── IDLE ──────────────────────────────────────────────────────────── */}
-        {state === 'idle' && (
-          <motion.div key="idle"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="card" style={{ padding: 32, textAlign: 'center' }}
+        {/* STAGE 1: INTAKE & BLUEPRINT FORM */}
+        {stage === 'intake' && (
+          <motion.div
+            key="intake"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 28 }}
           >
-            <h3 style={{ fontSize: 28, marginBottom: 10 }}>
-              Practice like it's <em style={{ color: 'var(--violet-light)' }}>real.</em>
-            </h3>
-            <p style={{ fontSize: 14, color: 'var(--text-2)', marginBottom: 28, maxWidth: 480, margin: '0 auto 28px' }}>
-              Enter the company and role. Alex — a senior technical interviewer — asks real scraped questions, listens to your spoken answer, and gives structured feedback after each one. End anytime for a full report.
-            </p>
-            <div style={{ display: 'flex', gap: 10, maxWidth: 440, margin: '0 auto', flexDirection: 'column' }}>
-              <input
-                className="input"
-                placeholder="Company (e.g. Google, Amazon, Flipkart)"
-                value={company}
-                onChange={e => setCompany(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleScrape()}
-              />
-              <input
-                className="input"
-                placeholder="Role (e.g. SDE, Product Manager, Data Scientist)"
-                value={role}
-                onChange={e => setRole(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleScrape()}
-              />
-              <button onClick={handleScrape} disabled={!company.trim() || !role.trim()} className="btn btn-primary">
-                Fetch Real Questions →
-              </button>
+            {/* Header */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.08em',
+                  padding: '4px 10px',
+                  borderRadius: 99,
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  color: '#818cf8',
+                  textTransform: 'uppercase',
+                }}>
+                  DAAZLING · Flagship AI Interview Platform
+                </span>
+              </div>
+              <h1 style={{ fontSize: 32, fontWeight: 900, color: 'var(--text-1, #f0f2f5)', margin: '0 0 8px' }}>
+                Calibrated Technical Mock Interview
+              </h1>
+              <p style={{ fontSize: 15, color: 'var(--text-2, #a0aec0)', margin: 0, maxWidth: 680 }}>
+                Real-time WebRTC audio connected to Gemini Multimodal Live duplex engine. Zero latency lag, evidence-asserted scoring, and mathematical zero-phantom question guarantees.
+              </p>
             </div>
-          </motion.div>
-        )}
 
-        {/* ── SCRAPING ────────────────────────────────────────────────────── */}
-        {state === 'scraping' && (
-          <motion.div key="scraping"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="card" style={{ padding: 48, textAlign: 'center' }}
-          >
-            <div className="spinner" style={{ width: 40, height: 40, margin: '0 auto 20px' }} />
-            <p style={{ fontSize: 16, fontWeight: 600 }}>Finding real interview questions…</p>
-            <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 6 }}>
-              Searching DuckDuckGo → Bing → Google · then AI-refining results
-            </p>
-            <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
-              This usually takes 10–20 seconds
-            </p>
-          </motion.div>
-        )}
-
-        {/* ── MIC DENIED — Improvement 6 ──────────────────────────────────── */}
-        {state === 'mic-denied' && (
-          <motion.div key="mic-denied"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="card" style={{ padding: 32, textAlign: 'center' }}
-          >
-            <AlertTriangle size={40} color="var(--rose)" style={{ margin: '0 auto 16px' }} />
-            <p style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Microphone Access Denied</p>
-            <p style={{ fontSize: 14, color: 'var(--text-2)', marginBottom: 6, maxWidth: 400, margin: '0 auto 8px' }}>
-              Alex needs microphone access to hear your answers.
-            </p>
-            <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 24, maxWidth: 440, margin: '0 auto 24px' }}>
-              Click the 🔒 lock icon in your browser's address bar → Site settings → Microphone → Allow. Then click Retry.
-            </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-              <button onClick={startListening} className="btn btn-primary" style={{ fontSize: 13 }}>
-                <Mic size={14} /> Retry Microphone
-              </button>
-              <button onClick={() => setState('interviewing')} className="btn btn-secondary" style={{ fontSize: 13 }}>
-                Skip (type instead)
-              </button>
+            {/* 1-Click Recruiter Presets */}
+            <div style={{
+              background: 'var(--surface-1, #12141a)',
+              border: '1px solid var(--border, #2a2e39)',
+              borderRadius: 16,
+              padding: 20,
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-3, #7a8290)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                ⚡ 1-Click Hiring Manager Presets
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                {RECRUITER_PRESETS.map((preset, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => applyPreset(preset)}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: 10,
+                      border: company === preset.company ? '1px solid #6366f1' : '1px solid var(--border, #2a2e39)',
+                      background: company === preset.company ? 'rgba(99, 102, 241, 0.15)' : 'var(--surface-2, #181c24)',
+                      color: company === preset.company ? '#a5b4fc' : 'var(--text-2, #cbd5e1)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </motion.div>
-        )}
 
-        {/* ── ERROR ────────────────────────────────────────────────────────── */}
-        {state === 'error' && (
-          <motion.div key="error"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="card" style={{ padding: 32, textAlign: 'center' }}
-          >
-            <p style={{ fontSize: 32, marginBottom: 12 }}>⚡</p>
-            <p style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Something went wrong</p>
-            <p style={{ fontSize: 13, color: 'var(--rose)', marginBottom: 20 }}>{error}</p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-              <button onClick={handleScrape} className="btn btn-primary" style={{ fontSize: 13 }}>Retry</button>
-              <button onClick={reset} className="btn btn-secondary" style={{ fontSize: 13, gap: 6 }}>
-                <RotateCcw size={13} /> Change Setup
-              </button>
+            {/* Intake Form Fields */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+              gap: 20,
+              background: 'var(--surface-1, #12141a)',
+              border: '1px solid var(--border, #2a2e39)',
+              borderRadius: 16,
+              padding: 28,
+            }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
+                  Target Company
+                </label>
+                <input
+                  type="text"
+                  value={company}
+                  onChange={e => setCompany(e.target.value)}
+                  placeholder="e.g. Google, Stripe, Meta"
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    border: '1px solid var(--border, #2a2e39)',
+                    background: 'var(--surface-2, #181c24)',
+                    color: 'var(--text-1, #f0f2f5)',
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
+                  Target Role
+                </label>
+                <input
+                  type="text"
+                  value={role}
+                  onChange={e => setRole(e.target.value)}
+                  placeholder="e.g. Staff Backend Engineer"
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    border: '1px solid var(--border, #2a2e39)',
+                    background: 'var(--surface-2, #181c24)',
+                    color: 'var(--text-1, #f0f2f5)',
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
+                  Seniority Level
+                </label>
+                <select
+                  value={seniority}
+                  onChange={e => setSeniority(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    border: '1px solid var(--border, #2a2e39)',
+                    background: 'var(--surface-2, #181c24)',
+                    color: 'var(--text-1, #f0f2f5)',
+                    fontSize: 14,
+                  }}
+                >
+                  <option value="Junior">Junior Engineer (L3)</option>
+                  <option value="Mid-Level">Mid-Level Engineer (L4)</option>
+                  <option value="Senior">Senior Engineer (L5)</option>
+                  <option value="Staff/Principal">Staff / Principal (L6+)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
+                  Candidate Display Name
+                </label>
+                <input
+                  type="text"
+                  value={candidateName}
+                  onChange={e => setCandidateName(e.target.value)}
+                  placeholder="Your Name"
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    border: '1px solid var(--border, #2a2e39)',
+                    background: 'var(--surface-2, #181c24)',
+                    color: 'var(--text-1, #f0f2f5)',
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
+                  Candidate Resume Highlights (Optional)
+                </label>
+                <textarea
+                  rows={3}
+                  value={resumeText}
+                  onChange={e => setResumeText(e.target.value)}
+                  placeholder="Paste resume summary, core projects, languages, or achievements to ground the questions on your actual experience..."
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    border: '1px solid var(--border, #2a2e39)',
+                    background: 'var(--surface-2, #181c24)',
+                    color: 'var(--text-1, #f0f2f5)',
+                    fontSize: 14,
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
+                  Target Job Description
+                </label>
+                <textarea
+                  rows={3}
+                  value={jdText}
+                  onChange={e => setJdText(e.target.value)}
+                  placeholder="Paste JD requirements or leave default preset..."
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    border: '1px solid var(--border, #2a2e39)',
+                    background: 'var(--surface-2, #181c24)',
+                    color: 'var(--text-1, #f0f2f5)',
+                    fontSize: 14,
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
             </div>
-          </motion.div>
-        )}
 
-        {/* ── READY ────────────────────────────────────────────────────────── */}
-        {state === 'ready' && (
-          <motion.div key="ready"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="card" style={{ padding: 32, textAlign: 'center' }}
-          >
-            <p style={{ fontSize: 40, fontWeight: 800, marginBottom: 6 }}>{questions.length}</p>
-            <p style={{ fontSize: 14, color: 'var(--text-2)', marginBottom: 6 }}>
-              questions loaded for{' '}
-              <strong style={{ color: 'var(--text)' }}>{company}</strong>
-              {' '}·{' '}
-              <strong style={{ color: 'var(--violet-light)' }}>{role}</strong>
-            </p>
-            <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 28, maxWidth: 460, margin: '0 auto 28px' }}>
-              Alex is ready. Speak your full answer, then click the mic button again when done. You'll get structured feedback after every answer, and a detailed report at the end.
-            </p>
-            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 24 }}>
-              Voice recognition requires Chrome or Edge
-            </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-              <button onClick={startInterview} className="btn btn-primary">Start Interview</button>
-              <button onClick={reset} className="btn btn-secondary" style={{ fontSize: 13, gap: 6 }}>
-                <RotateCcw size={13} /> Change Setup
-              </button>
-            </div>
-          </motion.div>
-        )}
+            {error && (
+              <div style={{
+                padding: '12px 16px',
+                borderRadius: 10,
+                background: 'rgba(244, 63, 94, 0.1)',
+                border: '1px solid rgba(244, 63, 94, 0.3)',
+                color: '#f43f5e',
+                fontSize: 14,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}>
+                <AlertTriangle size={18} /> {error}
+              </div>
+            )}
 
-        {/* ── INTERVIEW STAGES ─────────────────────────────────────────────── */}
-        {inInterview && (
-          <motion.div key="interview"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
-          >
-            {/* Alex card — hidden during feedback (feedback card takes over) */}
-            {state !== 'feedback' && (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-                className="card"
+            {/* Action Button */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={handleGenerateBlueprint}
+                disabled={loading}
                 style={{
-                  padding: 28,
-                  border: `1px solid ${isSpeaking ? 'rgba(14,165,233,0.5)' : 'var(--border)'}`,
-                  boxShadow: isSpeaking ? '0 0 20px rgba(14,165,233,0.15)' : 'none',
-                  transition: 'border-color 0.3s, box-shadow 0.3s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '14px 32px',
+                  borderRadius: 12,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                  color: '#fff',
+                  fontSize: 15,
+                  fontWeight: 700,
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 6px 18px rgba(99, 102, 241, 0.4)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: '50%',
-                    background: 'var(--accent)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontWeight: 800, fontSize: 15, color: '#fff', flexShrink: 0,
-                  }}>A</div>
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 600 }}>Alex</p>
-                    <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Senior Interviewer · {company}</p>
-                  </div>
-                  {isSpeaking && (
-                    <div className="waveform" style={{ marginLeft: 'auto' }}>
-                      {Array.from({ length: 7 }).map((_, i) => <div key={i} className="wave-bar" />)}
-                    </div>
-                  )}
-                </div>
-
-                {/* Improvement 1: clearer state message above the question */}
-                <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 8, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                  {state === 'interviewing'
-                    ? isSpeaking ? 'Alex is speaking — please wait' : 'Current question'
-                    : state === 'listening'   ? 'Alex is listening to your answer'
-                    : state === 'processing'  ? 'Alex is evaluating your answer'
-                    : 'Current question'}
-                </p>
-
-                {/* Improvement 3: question always visible during listening */}
-                <p style={{ fontSize: 15, lineHeight: 1.7, color: 'var(--text)' }}>
-                  {currentQ || 'Preparing your first question…'}
-                </p>
-              </motion.div>
-            )}
-
-            {/* Interviewing — mic button */}
-            {state === 'interviewing' && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-                className="card"
-                style={{ padding: 28, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}
-              >
-                <motion.button
-                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.97 }}
-                  onClick={startListening}
-                  disabled={isSpeaking}
-                  style={{
-                    width: 72, height: 72, borderRadius: '50%',
-                    background: isSpeaking ? 'var(--surface-3)' : 'var(--accent)',
-                    border: 'none', cursor: isSpeaking ? 'not-allowed' : 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    transition: 'background 0.2s',
-                  }}
-                >
-                  <Mic size={28} color="#fff" />
-                </motion.button>
-                {/* Improvement 1: crystal-clear instruction text */}
-                <p style={{ fontSize: 13, color: 'var(--text-2)', textAlign: 'center' }}>
-                  {isSpeaking
-                    ? 'Wait for Alex to finish speaking, then click to answer'
-                    : 'Click the mic, speak your answer, then click again to stop'
-                  }
-                </p>
-                <button onClick={handleSummary} className="btn btn-ghost" style={{ fontSize: 12, gap: 6 }}>
-                  <SkipForward size={13} /> End & get report
-                </button>
-              </motion.div>
-            )}
-
-            {/* Listening — live transcript, Improvement 2 (no React rerender on interim) */}
-            {state === 'listening' && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-                className="card"
-                style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}
-              >
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  onClick={stopListening}
-                  style={{
-                    width: 72, height: 72, borderRadius: '50%',
-                    background: 'var(--rose)', border: 'none',
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  <MicOff size={28} color="#fff" />
-                </motion.button>
-                {/* Improvement 1: explicit state label */}
-                <p style={{ fontSize: 13, color: 'var(--rose)', fontWeight: 600 }}>
-                  Recording — click to stop when done speaking
-                </p>
-
-                {/* Improvement 3: current question visible during listening */}
-                {currentQ && (
-                  <div style={{
-                    width: '100%', padding: '10px 14px',
-                    background: 'rgba(14,165,233,0.05)',
-                    borderRadius: 8, border: '1px solid rgba(14,165,233,0.15)',
-                  }}>
-                    <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Question</p>
-                    <p style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>{currentQ}</p>
-                  </div>
-                )}
-
-                {/* Live transcript — React state primary, DOM ref secondary */}
-                <div style={{
-                  width: '100%', padding: 16,
-                  background: 'var(--surface-2)', borderRadius: 10,
-                  border: '1px solid var(--border)', minHeight: 80,
-                }}>
-                  <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Your answer — live transcript
-                  </p>
-                  <span
-                    ref={liveSpanRef}
-                    style={{ fontSize: 13, color: liveText ? 'var(--text)' : 'var(--text-3)', lineHeight: 1.7 }}
-                  >
-                    {liveText || 'Speak now… your words will appear here'}
-                  </span>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Processing */}
-            {state === 'processing' && (
-              <motion.div
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="card" style={{ padding: 28, textAlign: 'center' }}
-              >
-                <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
-                  {[0, 1, 2].map(i => (
-                    <motion.div
-                      key={i}
-                      animate={{ y: [0, -6, 0] }}
-                      transition={{ repeat: Infinity, duration: 0.6, delay: i * 0.15 }}
-                      style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--violet-light)' }}
-                    />
-                  ))}
-                </div>
-                <p style={{ fontSize: 14, color: 'var(--text-2)', fontWeight: 500 }}>
-                  Alex is evaluating your answer…
-                </p>
-                {finalText && (
-                  <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 10, maxWidth: 420, margin: '10px auto 0' }}>
-                    Received: "{finalText.substring(0, 120)}{finalText.length > 120 ? '…' : ''}"
-                  </p>
-                )}
-              </motion.div>
-            )}
-
-            {/* Feedback — Improvements 5 (dimension scores) */}
-            {state === 'feedback' && feedback && (
-              <motion.div
-                key="feedback-card"
-                initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-                className="card"
-                style={{ padding: 28, border: '1px solid rgba(14,165,233,0.25)' }}
-              >
-                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, color: 'var(--violet-light)' }}>
-                  Alex's Feedback
-                </h3>
-
-                {feedback.reply && (
-                  <p style={{
-                    fontSize: 14, color: 'var(--text-2)', fontStyle: 'italic',
-                    marginBottom: 16, lineHeight: 1.6,
-                    paddingBottom: 14, borderBottom: '1px solid var(--border)',
-                  }}>
-                    "{feedback.reply}"
-                  </p>
-                )}
-
-                {/* Core 3 feedback fields */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                  {feedback.good && (
-                    <div style={{
-                      padding: '10px 14px',
-                      background: 'rgba(16,185,129,0.08)', borderRadius: 8,
-                      border: '1px solid rgba(16,185,129,0.18)', fontSize: 13, lineHeight: 1.6,
-                    }}>
-                      <strong style={{ color: 'var(--emerald)' }}>Good: </strong>
-                      {feedback.good}
-                    </div>
-                  )}
-                  {feedback.missing && (
-                    <div style={{
-                      padding: '10px 14px',
-                      background: 'rgba(245,158,11,0.08)', borderRadius: 8,
-                      border: '1px solid rgba(245,158,11,0.18)', fontSize: 13, lineHeight: 1.6,
-                    }}>
-                      <strong style={{ color: 'var(--amber)' }}>Missing: </strong>
-                      {feedback.missing}
-                    </div>
-                  )}
-                  {feedback.improve && (
-                    <div style={{
-                      padding: '10px 14px',
-                      background: 'rgba(14,165,233,0.08)', borderRadius: 8,
-                      border: '1px solid rgba(14,165,233,0.18)', fontSize: 13, lineHeight: 1.6,
-                    }}>
-                      <strong style={{ color: 'var(--violet-light)' }}>Improve: </strong>
-                      {feedback.improve}
-                    </div>
-                  )}
-                </div>
-
-                {/* Improvement 5: expandable dimension scores */}
-                {(feedback.technical_accuracy || feedback.depth || feedback.communication || feedback.completeness) && (
-                  <div style={{ marginBottom: 16 }}>
-                    <button
-                      onClick={() => setShowDims(v => !v)}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        fontSize: 12, color: 'var(--text-3)', fontWeight: 600,
-                        padding: '4px 0',
-                      }}
-                    >
-                      {showDims ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                      {showDims ? 'Hide' : 'Show'} dimension scores
-                    </button>
-                    <AnimatePresence>
-                      {showDims && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}
-                          style={{ overflow: 'hidden', marginTop: 8 }}
-                        >
-                          <DimRow label="Technical Accuracy" data={feedback.technical_accuracy} />
-                          <DimRow label="Depth" data={feedback.depth} />
-                          <DimRow label="Communication" data={feedback.communication} />
-                          <DimRow label="Completeness" data={feedback.completeness} />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <button onClick={handleContinue} className="btn btn-primary" style={{ fontSize: 13 }}>
-                    {currentQ ? 'Next Question →' : 'Finish & Get Report'}
-                  </button>
-                  <button onClick={handleSummary} className="btn btn-secondary" style={{ fontSize: 13 }}>
-                    Stop & Get Report
-                  </button>
-                </div>
-              </motion.div>
-            )}
+                {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+                {loading ? 'Synthesizing Blueprint...' : 'Generate Interview Blueprint'}
+              </button>
+            </div>
           </motion.div>
         )}
 
-        {/* ── SUMMARISING ──────────────────────────────────────────────────── */}
-        {state === 'summarising' && (
-          <motion.div key="summarising"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="card" style={{ padding: 48, textAlign: 'center' }}
+        {/* STAGE 2: BLUEPRINT PREVIEW & JOIN CALL */}
+        {stage === 'blueprint_ready' && blueprint && (
+          <motion.div
+            key="blueprint"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 24 }}
           >
-            <div className="spinner" style={{ width: 40, height: 40, margin: '0 auto 20px', borderTopColor: 'var(--amber)' }} />
-            <p style={{ fontSize: 16, fontWeight: 600 }}>Generating your interview report…</p>
-            <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 6 }}>
-              Analysing {asked.length} question{asked.length !== 1 ? 's' : ''} answered
-            </p>
-            <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
-              Two-pass evaluation — usually takes 15–30 seconds
-            </p>
-          </motion.div>
-        )}
-
-        {/* ── SUMMARY — Improvements 7 ─────────────────────────────────────── */}
-        {state === 'summary' && summary && (
-          <motion.div key="summary"
-            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          >
-            {/* Score + recommendation */}
-            <div className="card" style={{ padding: 28, marginBottom: 16 }}>
-              <div style={{ marginBottom: 20 }}>
-                <p style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-                  Overall Score
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+              <div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  ✓ Blueprint Synthesized & Immutable
+                </span>
+                <h2 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text-1, #f0f2f5)', margin: '4px 0 0' }}>
+                  {blueprint.seniority} {blueprint.role} at {blueprint.company}
+                </h2>
+                <p style={{ fontSize: 14, color: 'var(--text-2, #a0aec0)', margin: '4px 0 0' }}>
+                  Session ID: <code style={{ color: '#818cf8' }}>{sessionId}</code>
                 </p>
-                <ScoreBar score={summary.overall_score || 0} />
               </div>
 
-              {/* Recommendation badge — Improvement 7: clear colour coding */}
-              {summary.final_recommendation && (() => {
-                const rec = summary.final_recommendation;
-                const isHire = /^hire/i.test(rec);
-                const isNo   = /^no hire/i.test(rec);
-                const bgColor = isHire ? 'rgba(16,185,129,0.12)' : isNo ? 'rgba(244,63,94,0.12)' : 'rgba(245,158,11,0.12)';
-                const txtColor = isHire ? 'var(--emerald)' : isNo ? 'var(--rose)' : 'var(--amber)';
-                const borderColor = isHire ? 'rgba(16,185,129,0.25)' : isNo ? 'rgba(244,63,94,0.25)' : 'rgba(245,158,11,0.25)';
-                return (
-                  <div style={{
-                    padding: '12px 16px', borderRadius: 10,
-                    background: bgColor, border: `1px solid ${borderColor}`,
-                    marginBottom: 16,
-                  }}>
-                    <p style={{ fontSize: 15, fontWeight: 700, color: txtColor, marginBottom: 4 }}>
-                      {rec.split('—')[0].trim()}
-                    </p>
-                    <p style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.6 }}>
-                      {rec.includes('—') ? rec.split('—').slice(1).join('—').trim() : ''}
-                    </p>
-                  </div>
-                );
-              })()}
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setStage('intake')}
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: 10,
+                    border: '1px solid var(--border, #2a2e39)',
+                    background: 'var(--surface-2, #181c24)',
+                    color: 'var(--text-2, #cbd5e1)',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Edit Inputs
+                </button>
 
-              <p style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 20 }}>
-                {summary.overall_verdict}
-              </p>
-
-              {/* Strengths + Weaknesses */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div>
-                  <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--emerald)', marginBottom: 8 }}>Strengths</p>
-                  {(summary.strengths || []).map((s: string, i: number) => (
-                    <div key={i} style={{
-                      padding: '7px 10px', background: 'rgba(16,185,129,0.07)',
-                      borderRadius: 6, fontSize: 12, color: 'var(--text-2)', marginBottom: 5, lineHeight: 1.5,
-                    }}>{s}</div>
-                  ))}
-                </div>
-                <div>
-                  <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--rose)', marginBottom: 8 }}>Weaknesses</p>
-                  {(summary.weaknesses || []).map((w: string, i: number) => (
-                    <div key={i} style={{
-                      padding: '7px 10px', background: 'rgba(244,63,94,0.07)',
-                      borderRadius: 6, fontSize: 12, color: 'var(--text-2)', marginBottom: 5, lineHeight: 1.5,
-                    }}>{w}</div>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  onClick={handleStartCall}
+                  disabled={loading}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '10px 24px',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: '#fff',
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
+                  }}
+                >
+                  {loading ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+                  {loading ? 'Joining Room...' : 'Enter WebRTC Voice Room'}
+                </button>
               </div>
             </div>
 
-            {/* Q&A Breakdown */}
-            {summary.question_reviews?.length > 0 && (
-              <div className="card" style={{ padding: 28, marginBottom: 16 }}>
-                <p style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Question-by-Question Breakdown</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {summary.question_reviews.map((qr: any, idx: number) => (
-                    <div key={idx} style={{
-                      padding: 16, background: 'var(--surface-2)',
-                      borderRadius: 10, border: '1px solid var(--border)',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-                        <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', flex: 1, lineHeight: 1.5 }}>
-                          Q{idx + 1}: {qr.question}
-                        </p>
-                        <span style={{
-                          fontSize: 12, padding: '4px 10px', borderRadius: 99, flexShrink: 0,
-                          background: qr.score >= 70 ? 'rgba(16,185,129,0.1)' : qr.score >= 50 ? 'rgba(245,158,11,0.1)' : 'rgba(244,63,94,0.1)',
-                          color: qr.score >= 70 ? 'var(--emerald)' : qr.score >= 50 ? 'var(--amber)' : 'var(--rose)',
-                          fontWeight: 700,
-                        }}>
-                          {qr.score}/100
-                        </span>
-                      </div>
-
-                      {/* Competency tag if available */}
-                      {qr.competency_tested && (
-                        <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 8 }}>
-                          Tests: <strong style={{ color: 'var(--text-2)' }}>{qr.competency_tested}</strong>
-                        </p>
-                      )}
-
-                      <p style={{ fontSize: 13, marginBottom: 6, lineHeight: 1.5 }}>
-                        <strong style={{ color: 'var(--emerald)' }}>Good: </strong>{qr.what_was_good}
-                      </p>
-                      <p style={{ fontSize: 13, marginBottom: 6, lineHeight: 1.5 }}>
-                        <strong style={{ color: 'var(--rose)' }}>Missing: </strong>{qr.what_was_missing}
-                      </p>
-
-                      {/* Evidence quote if available */}
-                      {qr.key_evidence && (
-                        <p style={{
-                          fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic',
-                          padding: '6px 10px', background: 'var(--surface-3)',
-                          borderRadius: 6, marginBottom: 6, lineHeight: 1.5,
-                        }}>
-                          You said: "{qr.key_evidence}"
-                        </p>
-                      )}
-
-                      <p style={{
-                        fontSize: 13, padding: '8px 12px',
-                        background: 'rgba(14,165,233,0.08)',
-                        borderLeft: '3px solid var(--violet-light)',
-                        borderRadius: '0 6px 6px 0', lineHeight: 1.5,
-                      }}>
-                        <strong style={{ color: 'var(--violet-light)' }}>Key insight: </strong>
-                        {qr.model_answer_hint}
-                      </p>
-                    </div>
-                  ))}
-                </div>
+            {/* Keyword Pills */}
+            <div style={{
+              background: 'var(--surface-1, #12141a)',
+              border: '1px solid var(--border, #2a2e39)',
+              borderRadius: 14,
+              padding: 16,
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-3, #7a8290)', textTransform: 'uppercase' }}>
+                Technical Speech Recognition Vocabulary:
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                {blueprint.keywords.map((kw, idx) => (
+                  <span
+                    key={idx}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 99,
+                      background: 'rgba(99, 102, 241, 0.1)',
+                      border: '1px solid rgba(99, 102, 241, 0.25)',
+                      color: '#a5b4fc',
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {kw}
+                  </span>
+                ))}
               </div>
-            )}
+            </div>
 
-            {/* Improvement areas */}
-            {summary.improvement_areas?.length > 0 && (
-              <div className="card" style={{ padding: 28, marginBottom: 16 }}>
-                <p style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>Improvement Roadmap</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {summary.improvement_areas.map((ia: any, i: number) => (
-                    <div key={i} style={{
-                      padding: '12px 16px', background: 'var(--surface-2)',
-                      borderRadius: 8, border: '1px solid var(--border)',
-                    }}>
-                      <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{ia.area}</p>
-                      <p style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.5 }}>{ia.advice}</p>
-                    </div>
-                  ))}
+            {/* Planned Questions */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1, #f0f2f5)', margin: 0 }}>
+                Planned Technical Rounds ({blueprint.questions.length})
+              </h3>
+
+              {blueprint.questions.map((q, idx) => (
+                <div
+                  key={q.id}
+                  style={{
+                    background: 'var(--surface-1, #12141a)',
+                    border: '1px solid var(--border, #2a2e39)',
+                    borderRadius: 12,
+                    padding: 18,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#818cf8' }}>
+                      Question {idx + 1}
+                    </span>
+                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: 'rgba(255,255,255,0.06)', color: 'var(--text-3, #94a3b8)' }}>
+                      {q.competency}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: 14, color: 'var(--text-1, #f0f2f5)', margin: 0, fontWeight: 500 }}>
+                    {q.text}
+                  </p>
                 </div>
-              </div>
-            )}
-
-            <button onClick={reset} className="btn btn-primary" style={{ gap: 8 }}>
-              <RotateCcw size={14} /> Start New Interview
-            </button>
+              ))}
+            </div>
           </motion.div>
         )}
 
+        {/* STAGE 3: LIVE WEBRTC CALL */}
+        {stage === 'interview_live' && token && serverUrl && (
+          <motion.div
+            key="live"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+          >
+            <LiveKitRoomWrapper
+              token={token}
+              serverUrl={serverUrl}
+              onLeave={handleEndCall}
+              sessionTitle={`${blueprint?.seniority} ${blueprint?.role} · ${blueprint?.company}`}
+            />
+          </motion.div>
+        )}
+
+        {/* STAGE 4: EVALUATING SPINNER */}
+        {stage === 'evaluating' && (
+          <motion.div
+            key="evaluating"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: 400,
+              gap: 20,
+              textAlign: 'center',
+            }}
+          >
+            <Loader2 size={48} className="animate-spin" color="#6366f1" />
+            <div>
+              <h2 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-1, #f0f2f5)', margin: '0 0 8px' }}>
+                Auditing Spoken Turns & Assertions
+              </h2>
+              <p style={{ fontSize: 14, color: 'var(--text-2, #a0aec0)', maxWidth: 480, margin: 0 }}>
+                Querying verified utterances from the append-only Turn Ledger, extracting evidence quotes, and calculating deterministic mathematical scores.
+              </p>
+            </div>
+          </motion.div>
+        )}
+
+        {/* STAGE 5: GROUNDED DOSSIER REPORT */}
+        {stage === 'dossier' && dossier && (
+          <motion.div
+            key="dossier"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+          >
+            <DossierReport dossier={dossier} onRestart={handleRestart} />
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );

@@ -22,6 +22,25 @@ export const interviewChat = (payload: object) =>
 export const interviewSummary = (payload: object) =>
   api.post('/interview/summary', payload).then(r => r.data);
 
+// ── LiveKit WebRTC & Blueprint Gateway ────────────────────────────────────────
+export const getLiveKitToken = (room_name: string, participant_name: string, identity?: string) =>
+  api.post('/api/token', { room_name, participant_name, identity }).then(r => r.data);
+
+export const createBlueprint = (payload: {
+  company: string;
+  role: string;
+  seniority?: string;
+  resume_text?: string;
+  jd_text?: string;
+  session_id?: string;
+}) => api.post('/api/blueprint', payload).then(r => r.data);
+
+export const getBlueprint = (session_id: string) =>
+  api.get(`/api/blueprint/${session_id}`).then(r => r.data);
+
+export const evaluateSession = (session_id: string) =>
+  api.post(`/api/evaluate/${session_id}`).then(r => r.data);
+
 // ── Health ───────────────────────────────────────────────────────────────────
 export const health = () => api.get('/health').then(r => r.data);
 
