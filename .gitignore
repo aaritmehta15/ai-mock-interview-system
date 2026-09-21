@@ -7,6 +7,12 @@
 !.env.example
 !**/.env.example
 
+# ── Internal Planning & Scratch Files — NEVER COMMIT THESE ────────────────────
+ORIGINAL_BRIEF.md
+CHECKLIST.md
+PLAN.md
+testing_integration_guide.md
+
 # Firebase & Google Cloud
 firebase_credentials*.json
 firebase-adminsdk*.json
