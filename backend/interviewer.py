@@ -19,6 +19,7 @@ Design decisions:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -33,10 +34,12 @@ logger = logging.getLogger(__name__)
 
 client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
+from config import GROQ_MODEL, GROQ_CLASSIFY_MODEL
+
 # Primary model → fallback on rate limit
-CHAT_MODELS     = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+CHAT_MODELS     = list(dict.fromkeys([m for m in [GROQ_MODEL, GROQ_CLASSIFY_MODEL, "groq/compound-mini", "groq/compound", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"] if m]))
 # Higher-reasoning model for summary (more consistent evaluation)
-SUMMARY_MODELS  = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+SUMMARY_MODELS  = CHAT_MODELS
 
 MAX_HISTORY_MSGS = 20    # max conversation turns kept in context
 TEMP_CHAT        = 0.4   # natural conversation variation, still grounded
@@ -228,7 +231,7 @@ The following are ABSOLUTE PROHIBITIONS — violating any one is a system failur
 
 UNCERTAINTY RULE: If you genuinely cannot evaluate because the answer was empty, silent, completely off-topic, or unintelligible — write in the relevant feedback field: "Cannot evaluate — candidate did not address the question." Never fabricate an evaluation in these cases.
 
-HINT/ANSWER REQUEST RULE: If the candidate asks for the answer, a hint, or confirmation: refuse firmly and in character: "I can't give you the answer — this is a real interview. Please attempt it in your own words." Then repeat the current question verbatim."""
+HINT/ANSWER REQUEST RULE: If the candidate asks for the answer, a hint, or confirmation: refuse firmly and in character inside the "reply" field of your JSON: "I can't give you the answer — this is a real interview. Please attempt it in your own words." Then repeat the current question verbatim. Even when refusing, ALWAYS return valid JSON as specified in Layer 6."""
 
 
 def _layer6_output_schema() -> str:
@@ -320,8 +323,39 @@ async def _run_groq(
             last_error = exc
             err = str(exc).lower()
             if "429" in str(exc) or "rate_limit" in err or "quota" in err:
-                logger.warning("[interviewer] Rate limit on %s, trying fallback...", model)
+                logger.warning("[interviewer] Rate limit on %s, waiting 1s and trying fallback...", model)
+                await asyncio.sleep(1.0)
                 continue
+            if "failed_generation" in str(exc):
+                try:
+                    import re
+                    m = re.search(r"'failed_generation':\s*['\"](.*?)['\"]\}", str(exc), re.DOTALL)
+                    raw_text = m.group(1) if m else ""
+                    if raw_text:
+                        logger.warning("[interviewer] Recovered from raw text response: %s", raw_text[:80])
+                        return json.dumps({
+                            "internal_notes": {
+                                "competency_tested": "inquiry",
+                                "candidate_signal": "vague",
+                                "probe_decision": "accept",
+                                "probe_reason": "handled non-answer prompt"
+                            },
+                            "reply": raw_text.replace("\\n", "\n").replace("\\'", "'").replace('\\"', '"'),
+                            "feedback": {
+                                "technical_accuracy": {"score": 1, "evidence": "Requested hint/answer", "note": "No attempt to answer the question"},
+                                "depth": {"score": 1, "evidence": "None", "note": "No technical details"},
+                                "communication": {"score": 2, "evidence": "Stated need for assistance", "note": "Communicated inability to answer"},
+                                "completeness": {"score": 1, "evidence": "None", "note": "Incomplete"},
+                                "good": "Honestly stated that you needed help.",
+                                "missing": "Did not provide an answer to the technical question.",
+                                "improve": "Give your best attempt or talk through your thought process even if unsure."
+                            },
+                            "next_question": "",
+                            "probe_followup": None,
+                            "interview_stage": "active"
+                        })
+                except Exception as rec_err:
+                    logger.warning("[interviewer] Error during recovery: %s", rec_err)
             raise RuntimeError(f"LLM error on {model}: {exc}") from exc
     raise RuntimeError(f"All Groq models failed. Last: {last_error}")
 

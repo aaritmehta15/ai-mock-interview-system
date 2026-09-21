@@ -1,16 +1,65 @@
-# ── Secrets & credentials — NEVER COMMIT THESE ──────────────────────────────
+# ── Secrets, API Keys & Credentials — NEVER COMMIT THESE ──────────────────────
 .env
 .env.*
+*.env
+**/.env
+**/.env.*
 !.env.example
-firebase_credentials.json
+!**/.env.example
+
+# Firebase & Google Cloud
+firebase_credentials*.json
+firebase-adminsdk*.json
+*firebase*.json
+!firebase.json
+service_account*.json
+serviceAccount*.json
+google-services*.json
+GoogleService-Info*.plist
+
+# Groq, OpenAI, Anthropic, & Other AI API Keys / Configs
+*groq*.json
+*groq*.txt
+*groq*.key
+*openai*.json
+*anthropic*.json
+*api_key*
+*apikey*
+*.secret
+*.secrets
+
+# General Certificates, Private Keys & Tokens
+*credentials*.json
+*credentials*.yaml
+*credentials*.yml
+*secret*.json
+*secret*.yaml
+*secret*.yml
+*token*.json
+*token*.txt
 *.pem
 *.key
-service_account*.json
-*credentials*.json
-*secret*.json
+*.pfx
+*.p12
+*.pkcs12
+*.token
+*.cert
+*.crt
+
+# Local Databases
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# Cloud Provider Configs
+.aws/
+.gcloud/
+.azure/
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
@@ -25,6 +74,9 @@ venv/
 .venv/
 env/
 ENV/
+**/venv/
+**/.venv/
+**/env/
 
 # ── Node / JS ─────────────────────────────────────────────────────────────────
 node_modules/

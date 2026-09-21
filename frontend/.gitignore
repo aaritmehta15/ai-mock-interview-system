@@ -11,6 +11,17 @@ node_modules
 dist
 dist-ssr
 *.local
+# Secrets & Environment Variables
+.env
+.env.*
+*.env
+!.env.example
+*.pem
+*.key
+*secret*
+*credential*
+*firebase*.json
+*token*
 
 # Editor directories and files
 .vscode/*

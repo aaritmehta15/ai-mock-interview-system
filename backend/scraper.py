@@ -143,7 +143,8 @@ Your task:
 Return ONLY a JSON object: {{"questions": ["Q1?", "Q2?", ...]}}
 Minimum 10 questions. Every entry MUST end with a question mark."""
 
-    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    from config import GROQ_MODEL, GROQ_CLASSIFY_MODEL
+    models = list(dict.fromkeys([m for m in [GROQ_MODEL, GROQ_CLASSIFY_MODEL, "groq/compound-mini", "groq/compound", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"] if m]))
     for model in models:
         try:
             completion = await _groq_client.chat.completions.create(
