@@ -22,9 +22,43 @@ export const interviewChat = (payload: object) =>
 export const interviewSummary = (payload: object) =>
   api.post('/interview/summary', payload).then(r => r.data);
 
+export interface Persona {
+  id: string;
+  name: string;
+  title: string;
+  archetype: string;
+  badge_label: string;
+  accent_color: string;
+  difficulty: string;
+  tagline: string;
+  pause_tolerance_seconds: number;
+  thinking_pause_seconds: number;
+  probe_style: string;
+  traits: string[];
+  system_tone_prompt?: string;
+}
+
 // ── LiveKit WebRTC & Blueprint Gateway ────────────────────────────────────────
-export const getLiveKitToken = (room_name: string, participant_name: string, identity?: string) =>
-  api.post('/api/token', { room_name, participant_name, identity }).then(r => r.data);
+export const getPersonas = (): Promise<Persona[]> =>
+  api.get('/api/personas').then(r => r.data);
+
+export const stepTurn = (payload: {
+  session_id: string;
+  blueprint_id: string;
+  persona_id: string;
+  candidate_utterance: string;
+  current_question_index: number;
+  current_probe_count: number;
+  max_probes_per_question?: number;
+  questions_total?: number;
+}) => api.post('/api/orchestrator/step', payload).then(r => r.data);
+
+export const getLiveKitToken = (
+  room_name: string,
+  participant_name: string,
+  identity?: string,
+  persona_id: string = 'alex'
+) => api.post('/api/token', { room_name, participant_name, identity, persona_id }).then(r => r.data);
 
 export const createBlueprint = (payload: {
   company: string;
@@ -33,6 +67,7 @@ export const createBlueprint = (payload: {
   resume_text?: string;
   jd_text?: string;
   session_id?: string;
+  persona_id?: string;
 }) => api.post('/api/blueprint', payload).then(r => r.data);
 
 export const getBlueprint = (session_id: string) =>

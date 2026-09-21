@@ -9,14 +9,25 @@ import {
 import { Mic, MicOff, PhoneOff, Volume2, ShieldCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+import type { Persona } from '../lib/api';
+
 interface LiveKitRoomWrapperProps {
   token: string;
   serverUrl: string;
   onLeave: () => void;
   sessionTitle: string;
+  persona?: Persona | null;
 }
 
-function RoomControls({ onLeave, sessionTitle }: { onLeave: () => void; sessionTitle: string }) {
+function RoomControls({
+  onLeave,
+  sessionTitle,
+  persona,
+}: {
+  onLeave: () => void;
+  sessionTitle: string;
+  persona?: Persona | null;
+}) {
   const room = useRoomContext();
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
@@ -114,6 +125,30 @@ function RoomControls({ onLeave, sessionTitle }: { onLeave: () => void; sessionT
         padding: '32px 16px',
         overflow: 'hidden',
       }}>
+        {/* Active Interviewer Persona Card */}
+        {persona && (
+          <div style={{
+            position: 'absolute',
+            top: 14,
+            left: 16,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '4px 12px',
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: 99,
+            fontSize: 12,
+            color: '#e2e8f0',
+            zIndex: 3,
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: persona.accent_color || '#10b981' }} />
+            <span style={{ fontWeight: 600 }}>{persona.name}</span>
+            <span style={{ color: '#94a3b8' }}>·</span>
+            <span style={{ color: '#94a3b8' }}>{persona.archetype}</span>
+          </div>
+        )}
+
         {/* Glow halo */}
         <motion.div
           animate={{
@@ -126,7 +161,9 @@ function RoomControls({ onLeave, sessionTitle }: { onLeave: () => void; sessionT
             width: 220,
             height: 220,
             borderRadius: '50%',
-            background: agentSpeaking ? 'radial-gradient(circle, #6366f1 0%, transparent 70%)' : 'radial-gradient(circle, #3b82f6 0%, transparent 70%)',
+            background: agentSpeaking
+              ? `radial-gradient(circle, ${persona?.accent_color || '#6366f1'} 0%, transparent 70%)`
+              : 'radial-gradient(circle, #3b82f6 0%, transparent 70%)',
             filter: 'blur(30px)',
             pointerEvents: 'none',
           }}
@@ -137,7 +174,7 @@ function RoomControls({ onLeave, sessionTitle }: { onLeave: () => void; sessionT
           animate={{
             scale: agentSpeaking ? [1, 1.08, 0.98, 1.04, 1] : [1, 1.02, 1],
             boxShadow: agentSpeaking
-              ? '0 0 35px rgba(99, 102, 241, 0.8)'
+              ? `0 0 35px ${persona?.accent_color || 'rgba(99, 102, 241, 0.8)'}`
               : '0 0 20px rgba(59, 130, 246, 0.4)',
           }}
           transition={{ duration: agentSpeaking ? 0.8 : 2.5, repeat: Infinity }}
@@ -145,7 +182,11 @@ function RoomControls({ onLeave, sessionTitle }: { onLeave: () => void; sessionT
             width: 96,
             height: 96,
             borderRadius: '50%',
-            background: 'linear-gradient(135deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%)',
+            background: persona?.id === 'marcus'
+              ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%)'
+              : persona?.id === 'priya'
+              ? 'linear-gradient(135deg, #8b5cf6 0%, #6366f1 50%, #4338ca 100%)'
+              : 'linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -169,10 +210,16 @@ function RoomControls({ onLeave, sessionTitle }: { onLeave: () => void; sessionT
             border: agentSpeaking ? '1px solid #6366f1' : isSpeaking ? '1px solid #f43f5e' : '1px solid rgba(255, 255, 255, 0.1)',
             color: agentSpeaking ? '#a5b4fc' : isSpeaking ? '#fda4af' : 'var(--text-2, #a0aec0)',
           }}>
-            {agentSpeaking ? '🎙️ DAAZLING IS SPEAKING' : isSpeaking ? '🗣️ CANDIDATE SPEAKING' : '👂 LISTENING ATTENTIVELY'}
+            {agentSpeaking
+              ? `🎙️ ${persona?.name?.toUpperCase() || 'DAAZLING'} IS SPEAKING`
+              : isSpeaking
+              ? '🗣️ CANDIDATE SPEAKING'
+              : `👂 ${persona?.name?.toUpperCase() || 'DAAZLING'} IS LISTENING`}
           </span>
           <p style={{ fontSize: 13, color: 'var(--text-3, #7a8290)', margin: '8px 0 0' }}>
-            Speak naturally. When you finish, pause for 1-2 seconds for DAAZLING to respond.
+            {persona
+              ? `${persona.tagline}`
+              : 'Speak naturally. When you finish, pause for 1-2 seconds to respond.'}
           </p>
         </div>
 
@@ -183,7 +230,7 @@ function RoomControls({ onLeave, sessionTitle }: { onLeave: () => void; sessionT
               key={idx}
               animate={{
                 height: (agentSpeaking || isSpeaking) ? [baseH * 0.4, baseH * 1.3, baseH * 0.5] : 6,
-                background: agentSpeaking ? '#818cf8' : isSpeaking ? '#f43f5e' : '#334155',
+                background: agentSpeaking ? (persona?.accent_color || '#818cf8') : isSpeaking ? '#f43f5e' : '#334155',
               }}
               transition={{ duration: 0.4 + (idx % 4) * 0.1, repeat: Infinity, ease: 'easeInOut' }}
               style={{ width: 5, borderRadius: 99 }}
@@ -248,6 +295,7 @@ export default function LiveKitRoomWrapper({
   serverUrl,
   onLeave,
   sessionTitle,
+  persona,
 }: LiveKitRoomWrapperProps) {
   return (
     <LiveKitRoom
@@ -260,7 +308,7 @@ export default function LiveKitRoomWrapper({
       data-lk-theme="default"
     >
       <RoomAudioRenderer />
-      <RoomControls onLeave={onLeave} sessionTitle={sessionTitle} />
+      <RoomControls onLeave={onLeave} sessionTitle={sessionTitle} persona={persona} />
     </LiveKitRoom>
   );
 }

@@ -165,12 +165,18 @@ def compile_persona_instructions(
         f"{i+1}. [{q.competency.upper()}] {q.text}"
         for i, q in enumerate(blueprint.questions)
     )
+    keywords_formatted = ", ".join(blueprint.keywords) if getattr(blueprint, "keywords", None) else ""
 
     return f"""
+You are DAAZLING, an expert AI Technical Interviewer represented by {persona.name}, {persona.title} ({persona.archetype}).
+
 {persona.system_tone_prompt}
 
 TARGET ROLE: {blueprint.role} ({blueprint.seniority.upper()} level)
 TARGET COMPANY CONTEXT: {blueprint.company or 'Top-Tier Tech'}
+
+KEY TECHNICAL DOMAINS & KEYWORDS:
+{keywords_formatted}
 
 INTERVIEW BLUEPRINT QUESTIONS (Deliver sequentially; do not skip or combine):
 {questions_formatted}

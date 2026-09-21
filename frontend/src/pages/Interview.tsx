@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Sparkles,
@@ -6,10 +6,77 @@ import {
   AlertTriangle,
   Loader2,
 } from 'lucide-react';
-import { createBlueprint, getLiveKitToken, evaluateSession } from '../lib/api';
+import {
+  createBlueprint,
+  getLiveKitToken,
+  evaluateSession,
+  getPersonas,
+  type Persona,
+} from '../lib/api';
 import LiveKitRoomWrapper from '../components/LiveKitRoomWrapper';
 import DossierReport from '../components/DossierReport';
+import PersonaSelector from '../components/PersonaSelector';
 import type { InterviewDossier } from '../components/DossierReport';
+
+const FALLBACK_PERSONAS: Persona[] = [
+  {
+    id: 'alex',
+    name: 'Alex Rivera',
+    title: 'Engineering Lead',
+    archetype: 'The Empathetic Lead',
+    badge_label: 'Supportive & Mentoring',
+    accent_color: '#10B981',
+    difficulty: 'Moderate',
+    tagline: 'Encouraging and patient. Gives gentle nudges when you pause and helps you structure your thoughts.',
+    pause_tolerance_seconds: 4.5,
+    thinking_pause_seconds: 0.5,
+    probe_style: 'Scaffolding & Guided Clarification',
+    traits: [
+      'Patient listener',
+      'Provides subtle scaffolding hints',
+      'Celebrates sound architectural intuition',
+      'Forgives minor terminology slips',
+    ],
+  },
+  {
+    id: 'marcus',
+    name: 'Marcus Vance',
+    title: 'Principal Staff Architect',
+    archetype: 'The Skeptical Staff Engineer',
+    badge_label: 'Rigorous & Skeptical',
+    accent_color: '#F59E0B',
+    difficulty: 'High',
+    tagline: 'Analytical and unhurried. Inserts deliberate pauses, questions high-level buzzwords, and tests edge cases.',
+    pause_tolerance_seconds: 2.5,
+    thinking_pause_seconds: 2.0,
+    probe_style: 'Trade-Offs & Failure Mode Interrogation',
+    traits: [
+      'Deliberate, unhurried pauses',
+      'Challenges buzzwords immediately',
+      'Probes single points of failure (SPOF)',
+      'Demands trade-off justifications',
+    ],
+  },
+  {
+    id: 'priya',
+    name: 'Priya Sharma',
+    title: 'VP of Platform Engineering',
+    archetype: 'The High-Velocity Bar Raiser',
+    badge_label: 'Elite Bar Raiser',
+    accent_color: '#8B5CF6',
+    difficulty: 'Elite',
+    tagline: 'Fast-paced and exacting. Tests distributed scale, algorithmic optimality, and zero tolerance for hand-waving.',
+    pause_tolerance_seconds: 2.0,
+    thinking_pause_seconds: 0.2,
+    probe_style: 'Asymptotic Scale & Distributed Systems',
+    traits: [
+      'High tempo & rapid transitions',
+      'Demands exact asymptotic complexity',
+      'Refuses to give hints',
+      'Tests extreme scale (millions of QPS)',
+    ],
+  },
+];
 
 type Stage = 'intake' | 'blueprint_ready' | 'interview_live' | 'evaluating' | 'dossier';
 
@@ -63,6 +130,22 @@ export default function Interview() {
   const [jdText, setJdText] = useState(RECRUITER_PRESETS[0].jd);
   const [candidateName, setCandidateName] = useState('Alex Chen');
 
+  // Calibrated Personas
+  const [personas, setPersonas] = useState<Persona[]>(FALLBACK_PERSONAS);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('alex');
+
+  useEffect(() => {
+    getPersonas()
+      .then((data) => {
+        if (data && data.length > 0) {
+          setPersonas(data);
+        }
+      })
+      .catch((err) => console.warn('Using fallback personas:', err));
+  }, []);
+
+  const activePersona = personas.find((p) => p.id === selectedPersonaId) || personas[0];
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [blueprint, setBlueprint] = useState<InterviewBlueprint | null>(null);
@@ -96,6 +179,7 @@ export default function Interview() {
         resume_text: resumeText,
         jd_text: jdText,
         session_id: sid,
+        persona_id: selectedPersonaId,
       });
       setBlueprint(bp);
       setStage('blueprint_ready');
@@ -113,7 +197,7 @@ export default function Interview() {
     setError('');
 
     try {
-      const tokenRes = await getLiveKitToken(sessionId, candidateName);
+      const tokenRes = await getLiveKitToken(sessionId, candidateName, undefined, selectedPersonaId);
       setToken(tokenRes.token);
       setServerUrl(tokenRes.url);
       setStage('interview_live');
@@ -375,6 +459,20 @@ export default function Interview() {
               </div>
             </div>
 
+            {/* Calibrated Persona Selector */}
+            <div style={{
+              background: 'var(--surface-1, #12141a)',
+              border: '1px solid var(--border, #2a2e39)',
+              borderRadius: 16,
+              padding: 24,
+            }}>
+              <PersonaSelector
+                personas={personas}
+                selectedPersonaId={selectedPersonaId}
+                onSelectPersona={setSelectedPersonaId}
+              />
+            </div>
+
             {error && (
               <div style={{
                 padding: '12px 16px',
@@ -439,6 +537,35 @@ export default function Interview() {
                 <p style={{ fontSize: 14, color: 'var(--text-2, #a0aec0)', margin: '4px 0 0' }}>
                   Session ID: <code style={{ color: '#818cf8' }}>{sessionId}</code>
                 </p>
+
+                {/* Assigned Interviewer Persona Card */}
+                {activePersona && (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '8px 16px',
+                    borderRadius: 99,
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid var(--border, #2a2e39)',
+                    marginTop: 12,
+                  }}>
+                    <span style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: activePersona.accent_color,
+                      display: 'inline-block',
+                      boxShadow: `0 0 8px ${activePersona.accent_color}`,
+                    }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#f0f2f5' }}>
+                      Interviewer: {activePersona.name}
+                    </span>
+                    <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                      ({activePersona.archetype} · {activePersona.difficulty} Rigor)
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: 12 }}>
@@ -560,6 +687,7 @@ export default function Interview() {
               serverUrl={serverUrl}
               onLeave={handleEndCall}
               sessionTitle={`${blueprint?.seniority} ${blueprint?.role} · ${blueprint?.company}`}
+              persona={activePersona}
             />
           </motion.div>
         )}
