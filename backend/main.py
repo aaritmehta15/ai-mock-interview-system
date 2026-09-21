@@ -36,7 +36,10 @@ from config import APP_ENV, LOG_LEVEL
 from scraper import scrape_questions
 from interviewer import chat as interview_chat, generate_summary
 from services import firebase_service
+from services.blueprint_service import generate_blueprint, extract_text_from_pdf, InterviewBlueprint
+from livekit import api as livekit_api
 from utils.date_utils import today_utc
+import os
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -106,6 +109,86 @@ async def health() -> dict:
         "module": "voice-interview",
         "version": "2.1.0",
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LiveKit WebRTC & Blueprint Gateway Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TokenRequest(BaseModel):
+    room_name: str
+    participant_name: str
+    identity: Optional[str] = None
+
+class TokenResponse(BaseModel):
+    token: str
+    url: str
+
+class BlueprintRequest(BaseModel):
+    company: str
+    role: str
+    seniority: str = "Mid-Level"
+    resume_text: str = ""
+    jd_text: str = ""
+
+@app.post(
+    "/api/token",
+    response_model=TokenResponse,
+    summary="Generate LiveKit WebRTC Room Access Token",
+    tags=["LiveKit WebRTC Gateway"],
+)
+async def generate_livekit_token(req: TokenRequest):
+    url = os.getenv("LIVEKIT_URL", "")
+    api_key = os.getenv("LIVEKIT_API_KEY", "")
+    api_secret = os.getenv("LIVEKIT_API_SECRET", "")
+
+    if not url or not api_key or not api_secret:
+        raise HTTPException(
+            status_code=500,
+            detail="LiveKit credentials (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET) not configured.",
+        )
+
+    identity = req.identity or f"cand_{req.participant_name.lower().replace(' ', '_')}_{os.urandom(3).hex()}"
+    
+    token = (
+        livekit_api.AccessToken(api_key, api_secret)
+        .with_identity(identity)
+        .with_name(req.participant_name)
+        .with_grants(
+            livekit_api.VideoGrants(
+                room_join=True,
+                room=req.room_name,
+                can_publish=True,
+                can_subscribe=True,
+                can_publish_data=True,
+            )
+        )
+        .to_jwt()
+    )
+
+    return TokenResponse(token=token, url=url)
+
+
+@app.post(
+    "/api/blueprint",
+    response_model=InterviewBlueprint,
+    summary="Generate immutable Interview Blueprint from resume & JD",
+    tags=["LiveKit WebRTC Gateway"],
+)
+async def create_blueprint_endpoint(req: BlueprintRequest):
+    try:
+        bp = await generate_blueprint(
+            company=req.company,
+            role=req.role,
+            resume_text=req.resume_text,
+            jd_text=req.jd_text,
+            seniority=req.seniority,
+        )
+        return bp
+    except Exception as e:
+        logger.error("[blueprint] Error generating blueprint: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
