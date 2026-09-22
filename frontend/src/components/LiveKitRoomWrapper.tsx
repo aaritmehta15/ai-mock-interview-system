@@ -8,6 +8,7 @@ import {
 } from '@livekit/components-react';
 import { Mic, MicOff, PhoneOff, Volume2, ShieldCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
+import LatencyTelemetry from './LatencyTelemetry';
 
 import type { Persona } from '../lib/api';
 
@@ -78,6 +79,11 @@ function RoomControls({
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <LatencyTelemetry
+            isCallActive={true}
+            isAgentSpeaking={agentSpeaking}
+            isCandidateSpeaking={isSpeaking}
+          />
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -91,7 +97,7 @@ function RoomControls({
             fontWeight: 600,
           }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 8px #10b981' }} />
-            Connected · LiveKit Cloud
+            Connected
           </div>
           <div style={{
             display: 'flex',
