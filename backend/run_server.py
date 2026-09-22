@@ -14,7 +14,7 @@ import time
 def main():
     port = os.environ.get("PORT", "8000")
     host = os.environ.get("HOST", "0.0.0.0")
-    run_worker = os.environ.get("RUN_LIVEKIT_WORKER", "true").lower() in ("true", "1", "yes")
+    run_worker = os.environ.get("RUN_LIVEKIT_WORKER", "false").lower() in ("true", "1", "yes")
 
     processes = []
 
