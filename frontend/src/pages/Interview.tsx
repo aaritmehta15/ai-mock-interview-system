@@ -210,7 +210,14 @@ export default function Interview() {
       setStage('interview_live');
     } catch (err: any) {
       console.error('Failed to get token:', err);
-      setError(err?.response?.data?.detail || 'Failed to connect to LiveKit WebRTC Cloud.');
+      const detail = err?.response?.data?.detail;
+      if (detail && detail.includes('LiveKit credentials')) {
+        setError(
+          'LiveKit credentials (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET) are not configured in your Render service Environment tab. Please add them in the Render Dashboard to start the WebRTC voice call.'
+        );
+      } else {
+        setError(detail || 'Failed to connect to LiveKit WebRTC Cloud. Please check your backend connection.');
+      }
     } finally {
       setLoading(false);
     }
@@ -421,6 +428,25 @@ export default function Interview() {
               </div>
             )}
 
+            {error && (
+              <div
+                style={{
+                  padding: '14px 18px',
+                  borderRadius: 10,
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#f87171',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  fontSize: 14,
+                }}
+              >
+                <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+                <span>{error}</span>
+              </div>
+            )}
+
             {/* Action Bar */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
               <button
@@ -497,6 +523,25 @@ export default function Interview() {
                 </button>
               </div>
             </div>
+
+            {error && (
+              <div
+                style={{
+                  padding: '14px 18px',
+                  borderRadius: 10,
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#f87171',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  fontSize: 14,
+                }}
+              >
+                <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+                <span>{error}</span>
+              </div>
+            )}
 
             {/* Keyword Vocabulary Pills */}
             <div className="studio-card" style={{ padding: 18 }}>
