@@ -27,6 +27,7 @@ from livekit.agents import (
     cli,
 )
 from services.ledger_service import ledger_service
+from services.blueprint_service import get_blueprint, InterviewBlueprint
 from orchestrator.personas import (
     get_persona,
     compile_persona_instructions,
@@ -53,11 +54,15 @@ async def entrypoint(ctx: JobContext):
     await ctx.connect()
 
     session_id = ctx.room.name
-    bp = get_blueprint(session_id)
-    if bp:
-        logger.info("[agent] Loaded active blueprint for session %s: %s questions", session_id, len(bp.questions))
-    else:
-        logger.info("[agent] No pre-registered blueprint found for session %s; using standard engineering prompt", session_id)
+    bp = None
+    try:
+        bp = get_blueprint(session_id)
+        if bp:
+            logger.info("[agent] Loaded active blueprint for session %s: %s questions", session_id, len(bp.questions))
+        else:
+            logger.info("[agent] No pre-registered blueprint found for session %s; using standard engineering prompt", session_id)
+    except Exception as e:
+        logger.warning("[agent] Error looking up blueprint for session %s: %s", session_id, e)
 
     # Determine persona from room metadata or fallback to Alex
     persona_id = "alex"
@@ -72,16 +77,24 @@ async def entrypoint(ctx: JobContext):
     persona = get_persona(persona_id)
     logger.info("[agent] Active persona configured: %s (%s) with difficulty=%s", persona.name, persona.title, persona.difficulty)
     instructions = build_system_instructions(bp, persona)
-    gemini_key = os.getenv("GEMINI_API_KEY")
+
+    voice_map = {
+        "alex": "Puck",
+        "marcus": "Charon",
+        "priya": "Aoede",
+    }
+    voice = voice_map.get(persona_id, "Puck")
+
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     deepgram_key = os.getenv("DEEPGRAM_API_KEY")
 
     # Priority 1: Gemini Multimodal Live API (Direct Realtime Audio-to-Audio)
     if gemini_key:
-        logger.info("[agent] Initializing Gemini Multimodal Realtime Voice Model...")
+        logger.info("[agent] Initializing Gemini Multimodal Realtime Voice Model (voice=%s)...", voice)
         from livekit.plugins.google.beta import realtime
         model = realtime.RealtimeModel(
             api_key=gemini_key,
-            voice="Puck",
+            voice=voice,
             instructions=instructions,
         )
         agent = Agent(instructions=instructions, llm=model)
