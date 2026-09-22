@@ -1,20 +1,19 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
-import { useAuth } from '../context/AuthContext';
 
 export default function Layout() {
-  const { user, loading } = useAuth();
-  if (loading) return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh' }}>
-      <div className="spinner" style={{ width:40, height:40 }} />
-    </div>
-  );
-  if (!user) return <Navigate to="/" replace />;
-
   return (
-    <div className="layout">
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-base, #08090d)', color: 'var(--text-primary, #f8fafc)' }}>
       <Sidebar />
-      <main className="main-content" style={{ background: 'var(--bg)' }}>
+      <main
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflowY: 'auto',
+          height: '100vh',
+          background: 'var(--bg-base, #08090d)',
+        }}
+      >
         <Outlet />
       </main>
     </div>

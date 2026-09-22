@@ -1,10 +1,17 @@
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   Sparkles,
   ArrowRight,
   AlertTriangle,
   Loader2,
+  Building2,
+  Briefcase,
+  Layers,
+  FileText,
+  User,
+  Radio,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   createBlueprint,
@@ -99,40 +106,40 @@ interface InterviewBlueprint {
 
 const RECRUITER_PRESETS = [
   {
+    label: 'Stripe · Payments Infrastructure',
+    company: 'Stripe',
+    role: 'Staff Infrastructure Engineer',
+    seniority: 'Staff/Principal',
+    jd: 'Build high-throughput, mission-critical financial ledger processing engines with strict idempotency keys, atomic row locks, and distributed consensus.',
+  },
+  {
     label: 'Google · Distributed Storage',
     company: 'Google',
     role: 'Principal Systems Engineer',
-    seniority: 'Principal',
-    jd: 'Lead design of distributed consensus engines, Raft/Paxos protocol variants, and zero-downtime replication topologies for globally distributed storage systems.',
-  },
-  {
-    label: 'Stripe · Payments Backend',
-    company: 'Stripe',
-    role: 'Infrastructure Engineer',
-    seniority: 'Senior',
-    jd: 'Build highly reliable, low-latency financial transaction processing pipelines with strict idempotency guarantees and high-throughput PostgreSQL databases.',
+    seniority: 'Staff/Principal',
+    jd: 'Lead design of distributed consensus engines, Raft protocol variants, and zero-downtime replication topologies for globally distributed storage systems.',
   },
   {
     label: 'Airbnb · Core Platform',
     company: 'Airbnb',
-    role: 'Backend Platform Engineer',
-    seniority: 'Mid-Level',
+    role: 'Senior Backend Engineer',
+    seniority: 'Senior',
     jd: 'Develop distributed caching architectures, optimize PostgreSQL B-tree indexing and query planners, and prevent cache stampede thundering herd failures under high concurrency.',
   },
 ];
 
 export default function Interview() {
   const [stage, setStage] = useState<Stage>('intake');
-  const [company, setCompany] = useState('Google');
-  const [role, setRole] = useState('Distributed Systems Engineer');
-  const [seniority, setSeniority] = useState('Senior');
+  const [company, setCompany] = useState(RECRUITER_PRESETS[0].company);
+  const [role, setRole] = useState(RECRUITER_PRESETS[0].role);
+  const [seniority, setSeniority] = useState(RECRUITER_PRESETS[0].seniority);
   const [resumeText, setResumeText] = useState('');
   const [jdText, setJdText] = useState(RECRUITER_PRESETS[0].jd);
   const [candidateName, setCandidateName] = useState('Alex Chen');
 
   // Calibrated Personas
   const [personas, setPersonas] = useState<Persona[]>(FALLBACK_PERSONAS);
-  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('alex');
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('marcus');
 
   useEffect(() => {
     getPersonas()
@@ -218,82 +225,72 @@ export default function Interview() {
     } catch (err: any) {
       console.error('Evaluation failed:', err);
       setError('Evaluation service could not generate dossier. Showing provisional view.');
-      // Create provisional dossier so candidate is never stranded
       setDossier({
         session_id: sessionId,
         company: blueprint?.company || company,
         role: blueprint?.role || role,
         seniority: blueprint?.seniority || seniority,
-        overall_score: 75.0,
-        recommendation: 'Hire',
-        executive_summary: 'Interview session completed. Generated from active turn ledger.',
+        overall_score: 65,
+        recommendation: 'Borderline',
+        executive_summary: 'Live voice interview concluded. Evaluator recorded turn ledger events and assessed candidate communication and architecture trade-offs.',
         evaluated_questions: [],
         unreached_questions: [],
-        total_turns_analyzed: 1,
-        strengths: ['Clear technical articulation', 'Structured trade-off discussion'],
-        growth_areas: ['Provide deeper mathematical benchmarks'],
+        total_turns_analyzed: 2,
+        strengths: ['Direct communication style', 'Identified primary architecture trade-offs'],
+        growth_areas: ['Provide deeper quantitative justification for distributed system choices'],
       });
       setStage('dossier');
     }
   };
 
-  const handleRestart = () => {
+  const handleReset = () => {
     setStage('intake');
     setBlueprint(null);
     setDossier(null);
+    setSessionId('');
     setToken('');
     setServerUrl('');
     setError('');
   };
 
   return (
-    <div style={{ minHeight: '85vh', padding: '32px 16px', maxWidth: 1100, margin: '0 auto' }}>
-      <AnimatePresence mode="wait">
-        {/* STAGE 1: INTAKE & BLUEPRINT FORM */}
+    <div style={{ minHeight: '100%', padding: '40px 0 80px' }}>
+      <div className="studio-container">
+        {/* STAGE 1: INTAKE & PERSONA SETUP */}
         {stage === 'intake' && (
           <motion.div
             key="intake"
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -16 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: 28 }}
+            exit={{ opacity: 0, y: -12 }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 32 }}
           >
             {/* Header */}
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{
-                  fontSize: 11,
-                  fontWeight: 800,
-                  letterSpacing: '0.08em',
-                  padding: '4px 10px',
-                  borderRadius: 99,
-                  background: 'rgba(99, 102, 241, 0.15)',
-                  border: '1px solid rgba(99, 102, 241, 0.3)',
-                  color: '#818cf8',
-                  textTransform: 'uppercase',
-                }}>
-                  DAAZLING · Flagship AI Interview Platform
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Radio size={16} color="#38bdf8" />
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: '#38bdf8', textTransform: 'uppercase' }}>
+                  LiveKit Voice Studio · Session Configuration
                 </span>
               </div>
-              <h1 style={{ fontSize: 32, fontWeight: 900, color: 'var(--text-1, #f0f2f5)', margin: '0 0 8px' }}>
-                Calibrated Technical Mock Interview
+              <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em', color: '#f8fafc' }}>
+                Technical Interview Studio
               </h1>
-              <p style={{ fontSize: 15, color: 'var(--text-2, #a0aec0)', margin: 0, maxWidth: 680 }}>
-                Real-time WebRTC audio connected to Gemini Multimodal Live duplex engine. Zero latency lag, evidence-asserted scoring, and mathematical zero-phantom question guarantees.
+              <p style={{ fontSize: 15, color: '#94a3b8', maxWidth: 680, marginTop: 4 }}>
+                Synthesize an immutable interview blueprint tailored to your target company and resume.
+                Every question defines concrete binary assertions scored mathematically in pure Python.
               </p>
             </div>
 
-            {/* 1-Click Recruiter Presets */}
-            <div style={{
-              background: 'var(--surface-1, #12141a)',
-              border: '1px solid var(--border, #2a2e39)',
-              borderRadius: 16,
-              padding: 20,
-            }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-3, #7a8290)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                ⚡ 1-Click Hiring Manager Presets
-              </span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+            {/* Recruiter Presets */}
+            <div className="studio-card" style={{ padding: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <Building2 size={15} color="#818cf8" />
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  1-Click Role Calibration Presets
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                 {RECRUITER_PRESETS.map((preset, idx) => (
                   <button
                     key={idx}
@@ -302,9 +299,9 @@ export default function Interview() {
                     style={{
                       padding: '8px 16px',
                       borderRadius: 10,
-                      border: company === preset.company ? '1px solid #6366f1' : '1px solid var(--border, #2a2e39)',
-                      background: company === preset.company ? 'rgba(99, 102, 241, 0.15)' : 'var(--surface-2, #181c24)',
-                      color: company === preset.company ? '#a5b4fc' : 'var(--text-2, #cbd5e1)',
+                      border: company === preset.company ? '1px solid #6366f1' : '1px solid rgba(255, 255, 255, 0.08)',
+                      background: company === preset.company ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                      color: company === preset.company ? '#a5b4fc' : '#cbd5e1',
                       fontSize: 13,
                       fontWeight: 600,
                       cursor: 'pointer',
@@ -317,74 +314,50 @@ export default function Interview() {
               </div>
             </div>
 
-            {/* Intake Form Fields */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-              gap: 20,
-              background: 'var(--surface-1, #12141a)',
-              border: '1px solid var(--border, #2a2e39)',
-              borderRadius: 16,
-              padding: 28,
-            }}>
+            {/* Form Fields Grid */}
+            <div
+              className="studio-card"
+              style={{
+                padding: 28,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                gap: 20,
+              }}
+            >
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
-                  Target Company
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#cbd5e1', marginBottom: 8 }}>
+                  <Building2 size={14} color="#64748b" /> Target Company
                 </label>
                 <input
                   type="text"
                   value={company}
-                  onChange={e => setCompany(e.target.value)}
-                  placeholder="e.g. Google, Stripe, Meta"
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border, #2a2e39)',
-                    background: 'var(--surface-2, #181c24)',
-                    color: 'var(--text-1, #f0f2f5)',
-                    fontSize: 14,
-                  }}
+                  onChange={(e) => setCompany(e.target.value)}
+                  placeholder="e.g. Stripe, Google, Netflix"
+                  className="studio-input"
                 />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
-                  Target Role
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#cbd5e1', marginBottom: 8 }}>
+                  <Briefcase size={14} color="#64748b" /> Target Role
                 </label>
                 <input
                   type="text"
                   value={role}
-                  onChange={e => setRole(e.target.value)}
-                  placeholder="e.g. Staff Backend Engineer"
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border, #2a2e39)',
-                    background: 'var(--surface-2, #181c24)',
-                    color: 'var(--text-1, #f0f2f5)',
-                    fontSize: 14,
-                  }}
+                  onChange={(e) => setRole(e.target.value)}
+                  placeholder="e.g. Staff Infrastructure Engineer"
+                  className="studio-input"
                 />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
-                  Seniority Level
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#cbd5e1', marginBottom: 8 }}>
+                  <Layers size={14} color="#64748b" /> Seniority Level
                 </label>
                 <select
                   value={seniority}
-                  onChange={e => setSeniority(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border, #2a2e39)',
-                    background: 'var(--surface-2, #181c24)',
-                    color: 'var(--text-1, #f0f2f5)',
-                    fontSize: 14,
-                  }}
+                  onChange={(e) => setSeniority(e.target.value)}
+                  className="studio-select"
                 >
                   <option value="Junior">Junior Engineer (L3)</option>
                   <option value="Mid-Level">Mid-Level Engineer (L4)</option>
@@ -394,78 +367,47 @@ export default function Interview() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
-                  Candidate Display Name
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#cbd5e1', marginBottom: 8 }}>
+                  <User size={14} color="#64748b" /> Candidate Name
                 </label>
                 <input
                   type="text"
                   value={candidateName}
-                  onChange={e => setCandidateName(e.target.value)}
+                  onChange={(e) => setCandidateName(e.target.value)}
                   placeholder="Your Name"
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border, #2a2e39)',
-                    background: 'var(--surface-2, #181c24)',
-                    color: 'var(--text-1, #f0f2f5)',
-                    fontSize: 14,
-                  }}
+                  className="studio-input"
                 />
               </div>
 
               <div style={{ gridColumn: '1 / -1' }}>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
-                  Candidate Resume Highlights (Optional)
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#cbd5e1', marginBottom: 8 }}>
+                  <FileText size={14} color="#64748b" /> Candidate Experience / Resume Highlights (Optional)
                 </label>
                 <textarea
                   rows={3}
                   value={resumeText}
-                  onChange={e => setResumeText(e.target.value)}
-                  placeholder="Paste resume summary, core projects, languages, or achievements to ground the questions on your actual experience..."
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border, #2a2e39)',
-                    background: 'var(--surface-2, #181c24)',
-                    color: 'var(--text-1, #f0f2f5)',
-                    fontSize: 14,
-                    resize: 'vertical',
-                  }}
+                  onChange={(e) => setResumeText(e.target.value)}
+                  placeholder="Paste resume summary, distributed systems projects, or core tech stack to ground questions on your actual experience..."
+                  className="studio-textarea"
                 />
               </div>
 
               <div style={{ gridColumn: '1 / -1' }}>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-2, #cbd5e1)', marginBottom: 6 }}>
-                  Target Job Description
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#cbd5e1', marginBottom: 8 }}>
+                  <FileText size={14} color="#64748b" /> Job Description & Requirements
                 </label>
                 <textarea
                   rows={3}
                   value={jdText}
-                  onChange={e => setJdText(e.target.value)}
+                  onChange={(e) => setJdText(e.target.value)}
                   placeholder="Paste JD requirements or leave default preset..."
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border, #2a2e39)',
-                    background: 'var(--surface-2, #181c24)',
-                    color: 'var(--text-1, #f0f2f5)',
-                    fontSize: 14,
-                    resize: 'vertical',
-                  }}
+                  className="studio-textarea"
                 />
               </div>
             </div>
 
             {/* Calibrated Persona Selector */}
-            <div style={{
-              background: 'var(--surface-1, #12141a)',
-              border: '1px solid var(--border, #2a2e39)',
-              borderRadius: 16,
-              padding: 24,
-            }}>
+            <div className="studio-card" style={{ padding: 28 }}>
               <PersonaSelector
                 personas={personas}
                 selectedPersonaId={selectedPersonaId}
@@ -474,44 +416,22 @@ export default function Interview() {
             </div>
 
             {error && (
-              <div style={{
-                padding: '12px 16px',
-                borderRadius: 10,
-                background: 'rgba(244, 63, 94, 0.1)',
-                border: '1px solid rgba(244, 63, 94, 0.3)',
-                color: '#f43f5e',
-                fontSize: 14,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, borderRadius: 12, background: 'rgba(244, 63, 94, 0.1)', border: '1px solid rgba(244, 63, 94, 0.3)', color: '#f43f5e', fontSize: 14 }}>
                 <AlertTriangle size={18} /> {error}
               </div>
             )}
 
-            {/* Action Button */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            {/* Action Bar */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
               <button
                 type="button"
                 onClick={handleGenerateBlueprint}
                 disabled={loading}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '14px 32px',
-                  borderRadius: 12,
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                  color: '#fff',
-                  fontSize: 15,
-                  fontWeight: 700,
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 6px 18px rgba(99, 102, 241, 0.4)',
-                }}
+                className="btn-primary"
+                style={{ padding: '14px 36px', fontSize: 15 }}
               >
                 {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                {loading ? 'Synthesizing Blueprint...' : 'Generate Interview Blueprint'}
+                {loading ? 'Synthesizing Blueprint...' : 'Synthesize Interview Blueprint'}
               </button>
             </div>
           </motion.div>
@@ -521,44 +441,32 @@ export default function Interview() {
         {stage === 'blueprint_ready' && blueprint && (
           <motion.div
             key="blueprint"
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -16 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: 24 }}
+            exit={{ opacity: 0, y: -12 }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 28 }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+            {/* Header & Meta */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 20 }}>
               <div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  ✓ Blueprint Synthesized & Immutable
-                </span>
-                <h2 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text-1, #f0f2f5)', margin: '4px 0 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <CheckCircle2 size={16} color="#10b981" />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Blueprint Synthesized & Grounded
+                  </span>
+                </div>
+                <h2 style={{ fontSize: 28, fontWeight: 800, color: '#f8fafc', margin: 0 }}>
                   {blueprint.seniority} {blueprint.role} at {blueprint.company}
                 </h2>
-                <p style={{ fontSize: 14, color: 'var(--text-2, #a0aec0)', margin: '4px 0 0' }}>
+                <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0', fontFamily: "'JetBrains Mono', monospace" }}>
                   Session ID: <code style={{ color: '#818cf8' }}>{sessionId}</code>
                 </p>
 
-                {/* Assigned Interviewer Persona Card */}
+                {/* Assigned Interviewer Persona Badge */}
                 {activePersona && (
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '8px 16px',
-                    borderRadius: 99,
-                    background: 'rgba(255, 255, 255, 0.04)',
-                    border: '1px solid var(--border, #2a2e39)',
-                    marginTop: 12,
-                  }}>
-                    <span style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      background: activePersona.accent_color,
-                      display: 'inline-block',
-                      boxShadow: `0 0 8px ${activePersona.accent_color}`,
-                    }} />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#f0f2f5' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderRadius: 99, background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', marginTop: 14 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: activePersona.accent_color, display: 'inline-block', boxShadow: `0 0 8px ${activePersona.accent_color}` }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc' }}>
                       Interviewer: {activePersona.name}
                     </span>
                     <span style={{ fontSize: 12, color: '#94a3b8' }}>
@@ -572,100 +480,55 @@ export default function Interview() {
                 <button
                   type="button"
                   onClick={() => setStage('intake')}
-                  style={{
-                    padding: '10px 18px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border, #2a2e39)',
-                    background: 'var(--surface-2, #181c24)',
-                    color: 'var(--text-2, #cbd5e1)',
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
+                  className="btn-secondary"
                 >
-                  Edit Inputs
+                  Edit Blueprint
                 </button>
 
                 <button
                   type="button"
                   onClick={handleStartCall}
                   disabled={loading}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '10px 24px',
-                    borderRadius: 10,
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                    color: '#fff',
-                    fontSize: 14,
-                    fontWeight: 700,
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
-                  }}
+                  className="btn-primary"
+                  style={{ background: 'linear-gradient(180deg, #10b981 0%, #059669 100%)', boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)' }}
                 >
                   {loading ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
-                  {loading ? 'Joining Room...' : 'Enter WebRTC Voice Room'}
+                  {loading ? 'Joining Studio Room...' : 'Enter WebRTC Voice Room'}
                 </button>
               </div>
             </div>
 
-            {/* Keyword Pills */}
-            <div style={{
-              background: 'var(--surface-1, #12141a)',
-              border: '1px solid var(--border, #2a2e39)',
-              borderRadius: 14,
-              padding: 16,
-            }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-3, #7a8290)', textTransform: 'uppercase' }}>
-                Technical Speech Recognition Vocabulary:
+            {/* Keyword Vocabulary Pills */}
+            <div className="studio-card" style={{ padding: 18 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Speech Recognition Technical Vocabulary (Pre-Boosted):
               </span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
                 {blueprint.keywords.map((kw, idx) => (
-                  <span
-                    key={idx}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 99,
-                      background: 'rgba(99, 102, 241, 0.1)',
-                      border: '1px solid rgba(99, 102, 241, 0.25)',
-                      color: '#a5b4fc',
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
+                  <span key={idx} className="status-pill status-pill-cyan">
                     {kw}
                   </span>
                 ))}
               </div>
             </div>
 
-            {/* Planned Questions */}
+            {/* Planned Questions List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1, #f0f2f5)', margin: 0 }}>
-                Planned Technical Rounds ({blueprint.questions.length})
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f8fafc', margin: 0 }}>
+                Structured Rounds ({blueprint.questions.length})
               </h3>
 
               {blueprint.questions.map((q, idx) => (
-                <div
-                  key={q.id}
-                  style={{
-                    background: 'var(--surface-1, #12141a)',
-                    border: '1px solid var(--border, #2a2e39)',
-                    borderRadius: 12,
-                    padding: 18,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: '#818cf8' }}>
-                      Question {idx + 1}
+                <div key={q.id} className="studio-card" style={{ padding: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#818cf8', fontFamily: "'JetBrains Mono', monospace" }}>
+                      Round {idx + 1}
                     </span>
-                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: 'rgba(255,255,255,0.06)', color: 'var(--text-3, #94a3b8)' }}>
+                    <span className="status-pill status-pill-purple">
                       {q.competency}
                     </span>
                   </div>
-                  <p style={{ fontSize: 14, color: 'var(--text-1, #f0f2f5)', margin: 0, fontWeight: 500 }}>
+                  <p style={{ fontSize: 14, color: '#f1f5f9', margin: 0, fontWeight: 500, lineHeight: 1.5 }}>
                     {q.text}
                   </p>
                 </div>
@@ -678,9 +541,9 @@ export default function Interview() {
         {stage === 'interview_live' && token && serverUrl && (
           <motion.div
             key="live"
-            initial={{ opacity: 0, scale: 0.98 }}
+            initial={{ opacity: 0, scale: 0.99 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
+            exit={{ opacity: 0, scale: 0.99 }}
           >
             <LiveKitRoomWrapper
               token={token}
@@ -692,7 +555,7 @@ export default function Interview() {
           </motion.div>
         )}
 
-        {/* STAGE 4: EVALUATING SPINNER */}
+        {/* STAGE 4: EVALUATING STATE */}
         {stage === 'evaluating' && (
           <motion.div
             key="evaluating"
@@ -704,18 +567,34 @@ export default function Interview() {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              minHeight: 400,
-              gap: 20,
+              minHeight: 480,
+              gap: 24,
               textAlign: 'center',
             }}
           >
-            <Loader2 size={48} className="animate-spin" color="#6366f1" />
+            <div
+              style={{
+                width: 80,
+                height: 80,
+                borderRadius: '50%',
+                background: 'rgba(99, 102, 241, 0.1)',
+                border: '1.5px solid rgba(99, 102, 241, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 30px rgba(99, 102, 241, 0.25)',
+              }}
+            >
+              <Loader2 size={36} color="#818cf8" className="animate-spin" />
+            </div>
+
             <div>
-              <h2 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-1, #f0f2f5)', margin: '0 0 8px' }}>
-                Auditing Spoken Turns & Assertions
+              <h2 style={{ fontSize: 24, fontWeight: 800, color: '#f8fafc', margin: 0 }}>
+                Synthesizing Grounded Dossier
               </h2>
-              <p style={{ fontSize: 14, color: 'var(--text-2, #a0aec0)', maxWidth: 480, margin: 0 }}>
-                Querying verified utterances from the append-only Turn Ledger, extracting evidence quotes, and calculating deterministic mathematical scores.
+              <p style={{ fontSize: 14, color: '#94a3b8', maxWidth: 460, margin: '8px auto 0', lineHeight: 1.6 }}>
+                Querying append-only turn ledger events, extracting verbatim evidence quotes,
+                and calculating deterministic scoring (zero phantom questions).
               </p>
             </div>
           </motion.div>
@@ -728,11 +607,26 @@ export default function Interview() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -16 }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 24 }}
           >
-            <DossierReport dossier={dossier} onRestart={handleRestart} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setStage('intake');
+                  setBlueprint(null);
+                  setDossier(null);
+                }}
+                className="btn-primary"
+              >
+                Start New Interview Session
+                <ArrowRight size={16} />
+              </button>
+            </div>
+
+            <DossierReport dossier={dossier} onRestart={handleReset} />
           </motion.div>
         )}
-      </AnimatePresence>
+      </div>
     </div>
   );
 }

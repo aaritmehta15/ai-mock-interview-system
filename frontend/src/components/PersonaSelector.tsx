@@ -22,31 +22,39 @@ const PERSONA_CONFIGS: Record<
   {
     avatarGlow: string;
     badgeBg: string;
+    badgeBorder: string;
     badgeText: string;
+    accentColor: string;
     borderActive: string;
     icon: React.ReactNode;
   }
 > = {
   alex: {
-    avatarGlow: 'from-emerald-500 to-teal-400',
-    badgeBg: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400',
-    badgeText: 'Supportive & Mentoring',
-    borderActive: 'border-emerald-500 shadow-[0_0_25px_rgba(16,185,129,0.25)]',
-    icon: <Sparkles className="w-4 h-4 text-emerald-400" />,
+    avatarGlow: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+    badgeBg: 'rgba(16, 185, 129, 0.12)',
+    badgeBorder: 'rgba(16, 185, 129, 0.3)',
+    badgeText: '#10b981',
+    accentColor: '#10b981',
+    borderActive: 'rgba(16, 185, 129, 0.6)',
+    icon: <Sparkles size={14} color="#10b981" />,
   },
   marcus: {
-    avatarGlow: 'from-amber-500 to-orange-400',
-    badgeBg: 'bg-amber-500/15 border-amber-500/30 text-amber-400',
-    badgeText: 'Rigorous & Skeptical',
-    borderActive: 'border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.25)]',
-    icon: <ShieldAlert className="w-4 h-4 text-amber-400" />,
+    avatarGlow: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+    badgeBg: 'rgba(245, 158, 11, 0.12)',
+    badgeBorder: 'rgba(245, 158, 11, 0.3)',
+    badgeText: '#f59e0b',
+    accentColor: '#f59e0b',
+    borderActive: 'rgba(245, 158, 11, 0.6)',
+    icon: <ShieldAlert size={14} color="#f59e0b" />,
   },
   priya: {
-    avatarGlow: 'from-purple-500 to-indigo-400',
-    badgeBg: 'bg-purple-500/15 border-purple-500/30 text-purple-400',
-    badgeText: 'Elite Bar Raiser',
-    borderActive: 'border-purple-500 shadow-[0_0_25px_rgba(139,92,246,0.25)]',
-    icon: <Zap className="w-4 h-4 text-purple-400" />,
+    avatarGlow: 'linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)',
+    badgeBg: 'rgba(139, 92, 246, 0.12)',
+    badgeBorder: 'rgba(139, 92, 246, 0.3)',
+    badgeText: '#a78bfa',
+    accentColor: '#8b5cf6',
+    borderActive: 'rgba(139, 92, 246, 0.6)',
+    icon: <Zap size={14} color="#a78bfa" />,
   },
 };
 
@@ -56,112 +64,195 @@ export default function PersonaSelector({
   onSelectPersona,
 }: PersonaSelectorProps) {
   return (
-    <div className="w-full space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
         <div>
-          <h3 className="text-sm font-semibold tracking-wider uppercase text-zinc-400 flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-indigo-400" />
-            Select Your Calibrated Interviewer
-          </h3>
-          <p className="text-xs text-zinc-500 mt-0.5">
-            Choose an interviewer persona calibrated to the psychological pressure you want to inoculate against.
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <TrendingUp size={16} color="#818cf8" />
+            <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#94a3b8', margin: 0 }}>
+              Calibrated Interviewer Personas
+            </h3>
+          </div>
+          <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0' }}>
+            Choose an interviewer calibrated to the exact conversational psychology and pushback you want to inoculate against.
           </p>
         </div>
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-800/80 border border-zinc-700/60 text-[11px] text-zinc-300 self-start sm:self-auto">
-          <Clock className="w-3 h-3 text-zinc-400" />
+        <div className="status-pill status-pill-cyan">
+          <Clock size={12} />
           <span>Realtime Voice Dynamics</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          gap: 16,
+        }}
+      >
         {personas.map((persona) => {
           const isSelected = persona.id === selectedPersonaId;
           const config = PERSONA_CONFIGS[persona.id] || {
-            avatarGlow: 'from-blue-500 to-cyan-400',
-            badgeBg: 'bg-blue-500/15 border-blue-500/30 text-blue-400',
-            badgeText: persona.archetype,
-            borderActive: 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.25)]',
-            icon: <Sparkles className="w-4 h-4 text-blue-400" />,
+            avatarGlow: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+            badgeBg: 'rgba(59, 130, 246, 0.12)',
+            badgeBorder: 'rgba(59, 130, 246, 0.3)',
+            badgeText: '#60a5fa',
+            accentColor: '#3b82f6',
+            borderActive: 'rgba(59, 130, 246, 0.6)',
+            icon: <Sparkles size={14} color="#60a5fa" />,
           };
 
           return (
             <motion.div
               key={persona.id}
-              whileHover={{ y: -3, transition: { duration: 0.2 } }}
+              whileHover={{ y: -2, transition: { duration: 0.15 } }}
               whileTap={{ scale: 0.99 }}
               onClick={() => onSelectPersona(persona.id)}
-              className={`relative cursor-pointer rounded-2xl p-5 transition-all duration-300 flex flex-col justify-between backdrop-blur-xl border ${
-                isSelected
-                  ? `bg-zinc-900/90 ${config.borderActive}`
-                  : 'bg-zinc-900/40 border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900/60'
-              }`}
+              style={{
+                position: 'relative',
+                cursor: 'pointer',
+                borderRadius: 16,
+                padding: 22,
+                background: isSelected ? 'rgba(18, 22, 32, 0.95)' : 'rgba(14, 17, 24, 0.6)',
+                border: isSelected
+                  ? `1.5px solid ${config.borderActive}`
+                  : '1px solid rgba(255, 255, 255, 0.08)',
+                boxShadow: isSelected
+                  ? `0 0 25px ${config.badgeBg}`
+                  : '0 4px 16px rgba(0, 0, 0, 0.3)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                transition: 'all 0.2s ease',
+              }}
             >
-              {/* Selected Check Pill */}
+              {/* Selected Check Indicator */}
               {isSelected && (
-                <div className="absolute top-4 right-4 flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 text-white text-[11px] font-medium border border-white/20">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 16,
+                    right: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 8px',
+                    borderRadius: 99,
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#f8fafc',
+                  }}
+                >
+                  <CheckCircle2 size={12} color="#10b981" />
                   <span>Selected</span>
                 </div>
               )}
 
               <div>
-                {/* Header: Avatar + Name + Title */}
-                <div className="flex items-center gap-3 mb-3">
+                {/* Header: Avatar + Info */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
                   <div
-                    className={`w-12 h-12 rounded-xl bg-gradient-to-tr ${config.avatarGlow} p-0.5 flex-shrink-0`}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 12,
+                      background: config.avatarGlow,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      color: '#fff',
+                      fontSize: 16,
+                      boxShadow: `0 0 14px ${config.badgeBg}`,
+                      flexShrink: 0,
+                    }}
                   >
-                    <div className="w-full h-full rounded-[10px] bg-zinc-950 flex items-center justify-center font-bold text-white text-base">
-                      {persona.name
-                        .split(' ')
-                        .map((n) => n[0])
-                        .join('')}
-                    </div>
+                    {persona.name
+                      .split(' ')
+                      .map((n) => n[0])
+                      .join('')}
                   </div>
-                  <div className="min-w-0 pr-16">
-                    <h4 className="font-semibold text-white text-sm truncate flex items-center gap-1.5">
+                  <div style={{ minWidth: 0, paddingRight: isSelected ? 80 : 0 }}>
+                    <h4 style={{ fontSize: 15, fontWeight: 700, color: '#f8fafc', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {persona.name}
                     </h4>
-                    <p className="text-xs text-zinc-400 truncate">{persona.title}</p>
+                    <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {persona.title}
+                    </p>
                   </div>
                 </div>
 
-                {/* Archetype Badge */}
-                <div className="flex items-center gap-2 mb-3">
+                {/* Archetype & Difficulty Badges */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                   <span
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-medium border ${config.badgeBg}`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      background: config.badgeBg,
+                      border: `1px solid ${config.badgeBorder}`,
+                      color: config.badgeText,
+                    }}
                   >
                     {config.icon}
-                    {config.badgeText}
+                    {persona.archetype}
                   </span>
-                  <span className="text-[11px] px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-300 font-mono">
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      color: '#cbd5e1',
+                    }}
+                  >
                     {persona.difficulty}
                   </span>
                 </div>
 
                 {/* Tagline */}
-                <p className="text-xs text-zinc-300 leading-relaxed mb-4">
+                <p style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.6, marginBottom: 14 }}>
                   {persona.tagline}
                 </p>
 
-                {/* Persona Behavioral Traits */}
-                <div className="space-y-1.5 mb-4">
+                {/* Behavioral Traits */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
                   {persona.traits.map((trait, idx) => (
-                    <div key={idx} className="flex items-start gap-2 text-[11px] text-zinc-400">
-                      <span className="w-1 h-1 rounded-full bg-zinc-600 mt-1.5 flex-shrink-0" />
-                      <span className="leading-snug">{trait}</span>
+                    <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#94a3b8' }}>
+                      <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#64748b', marginTop: 7, flexShrink: 0 }} />
+                      <span style={{ lineHeight: 1.4 }}>{trait}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Bottom Telemetry Info */}
-              <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-500 font-mono">
-                <span className="flex items-center gap-1">
-                  <HelpCircle className="w-3 h-3 text-zinc-500" />
+              {/* Bottom Telemetry Footer */}
+              <div
+                style={{
+                  paddingTop: 12,
+                  borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  color: '#64748b',
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <HelpCircle size={12} color="#64748b" />
                   Pause: {persona.pause_tolerance_seconds}s
                 </span>
-                <span className="text-right truncate max-w-[130px]" title={persona.probe_style}>
-                  {persona.probe_style.split('&')[0]}
+                <span style={{ color: '#94a3b8' }}>
+                  {persona.probe_style.split('&')[0].trim()}
                 </span>
               </div>
             </motion.div>
