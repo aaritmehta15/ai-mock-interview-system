@@ -47,10 +47,10 @@ def main():
     api_proc = subprocess.Popen(api_cmd)
     processes.append(api_proc)
 
-    # 2. Start LiveKit Voice Agent Worker (in dev single-thread mode to avoid port 8081 collision and memory exhaustion)
+    # 2. Start LiveKit Voice Agent Worker
     if run_worker and os.environ.get("LIVEKIT_URL"):
-        print("[Supervisor] LIVEKIT_URL detected. Launching LiveKit Worker Agent (lightweight single-thread mode)...")
-        worker_cmd = [sys.executable, "agent.py", "dev", "--no-reload"]
+        print("[Supervisor] LIVEKIT_URL detected. Launching LiveKit Worker Agent...")
+        worker_cmd = [sys.executable, "agent.py", "start"]
         worker_proc = subprocess.Popen(worker_cmd)
         processes.append(worker_proc)
     else:
