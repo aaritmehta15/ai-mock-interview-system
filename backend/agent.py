@@ -89,32 +89,56 @@ async def entrypoint(ctx: JobContext):
 
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     deepgram_key = os.getenv("DEEPGRAM_API_KEY")
+    groq_key = os.getenv("GROQ_API_KEY")
+
+    # Validate Gemini key format — Gemini AI Studio keys always start with "AIza"
+    if gemini_key and not gemini_key.startswith("AIza"):
+        logger.error(
+            "[agent] GEMINI_API_KEY looks invalid (expected 'AIza...' prefix, got '%s...'). "
+            "Get a real key from https://aistudio.google.com/app/apikey — falling back.",
+            gemini_key[:8]
+        )
+        gemini_key = None  # force fallback
 
     # Priority 1: Gemini Multimodal Live API (Direct Realtime Audio-to-Audio)
     if gemini_key:
-        logger.info("[agent] Initializing Gemini Multimodal Realtime Voice Model (voice=%s)...", voice)
-        model = realtime.RealtimeModel(
-            api_key=gemini_key,
-            voice=voice,
-            instructions=instructions,
-        )
-        agent = Agent(instructions=instructions)
-        session = AgentSession(llm=model)
-    elif deepgram_key:
-        # Fallback: Deepgram STT + Groq LLM + Deepgram TTS
-        logger.info("[agent] Initializing Deepgram STT + Groq LLM + Deepgram TTS pipeline...")
-        groq_llm = openai.LLM(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=os.getenv("GROQ_API_KEY"),
-            model=os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
-        )
-        stt = deepgram.STT()
-        tts = deepgram.TTS()
-        vad = silero.VAD.load()
-        agent = Agent(instructions=instructions, llm=groq_llm, stt=stt, tts=tts, vad=vad)
-        session = AgentSession(stt=stt, vad=vad, llm=groq_llm, tts=tts)
-    else:
-        raise ValueError("Neither GEMINI_API_KEY nor DEEPGRAM_API_KEY found in environment.")
+        logger.info("[agent] Initializing Gemini Multimodal Realtime Voice Model (model=gemini-2.0-flash-live-001, voice=%s)...", voice)
+        try:
+            model = realtime.RealtimeModel(
+                model="gemini-2.0-flash-live-001",
+                api_key=gemini_key,
+                voice=voice,
+                instructions=instructions,
+            )
+            agent = Agent(instructions=instructions)
+            session = AgentSession(llm=model)
+            logger.info("[agent] Gemini Realtime model initialized successfully.")
+        except Exception as e:
+            logger.error("[agent] Gemini model init FAILED: %s — falling back to Groq.", e)
+            gemini_key = None  # force fallback below
+
+    if not gemini_key:
+        if groq_key:
+            logger.info("[agent] Using Groq LLM pipeline (STT=deepgram or none, LLM=groq).")
+            groq_llm = openai.LLM(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=groq_key,
+                model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            )
+            if deepgram_key:
+                stt = deepgram.STT()
+                tts = deepgram.TTS()
+                vad = silero.VAD.load()
+                agent = Agent(instructions=instructions)
+                session = AgentSession(stt=stt, vad=vad, llm=groq_llm, tts=tts)
+            else:
+                # Groq only — no TTS available, but at least the LLM responds via text
+                logger.warning("[agent] No DEEPGRAM_API_KEY — agent will respond but may not speak audio.")
+                vad = silero.VAD.load()
+                agent = Agent(instructions=instructions)
+                session = AgentSession(vad=vad, llm=groq_llm)
+        else:
+            raise ValueError("No valid AI key found. Set GEMINI_API_KEY (starts with AIza) or GROQ_API_KEY in Render Environment.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Transcript & Turn Ledger Synchronization
