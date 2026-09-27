@@ -23,6 +23,7 @@ from livekit.agents import (
     Agent,
     AgentSession,
     JobContext,
+    JobExecutorType,
     WorkerOptions,
     cli,
 )
@@ -204,6 +205,7 @@ def main():
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
+            job_executor_type=JobExecutorType.THREAD,
             ws_url=url,
             api_key=api_key,
             api_secret=api_secret,
