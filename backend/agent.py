@@ -171,20 +171,27 @@ async def entrypoint(ctx: JobContext):
     # Wait for first human participant and welcome them
     participant = await ctx.wait_for_participant()
     logger.info("[agent] Participant joined: %s (%s)", participant.identity, participant.name)
-    
+
     # Send warm opening greeting
+    # NOTE: session.say() and session.generate_reply() return SpeechHandle (not coroutines)
+    # You must call them without await, then await the handle to wait for completion.
     greeting_text = (
         f"Hi {participant.name or 'there'}! I'm {persona.name}, {persona.title}. "
         "Welcome to your technical session. Whenever you're ready, let me know and we'll dive right into our first question."
     )
     try:
-        await session.say(greeting_text)
+        handle = session.say(greeting_text)
+        await handle
+        logger.info("[agent] Greeting delivered successfully.")
     except Exception as e:
-        logger.warning("[agent] session.say greeting notice: %s; using generate_reply", e)
+        logger.error("[agent] session.say() failed: %s — trying generate_reply()", e)
         try:
-            await session.generate_reply(user_input="The candidate has entered the room. Greet them warmly and introduce the first question.")
+            handle = session.generate_reply(
+                user_input="The candidate has entered the room. Greet them warmly and introduce the first question."
+            )
+            await handle
         except Exception as e2:
-            logger.error("[agent] Greeting trigger error: %s", e2)
+            logger.error("[agent] generate_reply() also failed: %s", e2)
 
     logger.info("[agent] Ready and listening for candidate voice stream...")
 
