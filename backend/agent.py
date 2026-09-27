@@ -98,7 +98,7 @@ async def entrypoint(ctx: JobContext):
             voice=voice,
             instructions=instructions,
         )
-        agent = Agent(instructions=instructions, llm=model)
+        agent = Agent(instructions=instructions)
         session = AgentSession(llm=model)
     elif deepgram_key:
         # Fallback: Deepgram STT + Groq LLM + Deepgram TTS
@@ -151,7 +151,7 @@ async def entrypoint(ctx: JobContext):
                     )
 
     # Start session on room
-    session.start(agent, room=ctx.room)
+    await session.start(agent=agent, room=ctx.room)
     logger.info("[agent] Session started successfully in room %s", ctx.room.name)
 
     # Wait for first human participant and welcome them
