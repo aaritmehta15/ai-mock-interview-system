@@ -28,7 +28,6 @@ from livekit.agents import (
     cli,
 )
 from livekit.plugins.google.beta import realtime
-from livekit.plugins import deepgram, silero, openai
 from services.ledger_service import ledger_service
 from services.blueprint_service import get_blueprint, InterviewBlueprint
 from orchestrator.personas import (
@@ -109,6 +108,7 @@ async def entrypoint(ctx: JobContext):
             gemini_key = None  # force fallback below
 
     if not gemini_key:
+        from livekit.plugins import deepgram, silero, openai
         if groq_key:
             logger.info("[agent] Using Groq LLM pipeline (STT=deepgram or none, LLM=groq).")
             groq_llm = openai.LLM(
@@ -129,7 +129,7 @@ async def entrypoint(ctx: JobContext):
                 agent = Agent(instructions=instructions)
                 session = AgentSession(vad=vad, llm=groq_llm)
         else:
-            raise ValueError("No valid AI key found. Set GEMINI_API_KEY (starts with AIza) or GROQ_API_KEY in Render Environment.")
+            raise ValueError("No valid AI key found. Set GEMINI_API_KEY or GROQ_API_KEY in Render Environment.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Transcript & Turn Ledger Synchronization

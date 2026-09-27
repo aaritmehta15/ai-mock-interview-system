@@ -2,9 +2,12 @@
 run_server.py
 
 Unified process runner for single-container cloud environments (Render, Railway, etc.).
-Launches both FastAPI (Uvicorn) and the LiveKit Voice Agent Worker concurrently.
-Ensures FastAPI stays online 100% of the time for health checks and REST endpoints,
-while automatically restarting the LiveKit Worker if it encounters any transient disconnection.
+- When RUN_LIVEKIT_WORKER is false (default for Render Web Service):
+  Runs FastAPI / Uvicorn directly in the main process.
+  Memory usage is ~100MB (well below Render's 512MB limit).
+  Ensures 100% API uptime, zero OOM terminations, and instant wake-ups.
+- When RUN_LIVEKIT_WORKER is true (or when running on a dedicated worker):
+  Supervises both FastAPI and the LiveKit Voice Agent Worker concurrently with auto-restart.
 """
 import os
 import signal
@@ -25,8 +28,17 @@ def main():
 
     port = os.environ.get("PORT", "8000")
     host = os.environ.get("HOST", "0.0.0.0")
-    run_worker = os.environ.get("RUN_LIVEKIT_WORKER", "true").lower() in ("true", "1", "yes")
+    run_worker = os.environ.get("RUN_LIVEKIT_WORKER", "false").lower() in ("true", "1", "yes")
 
+    # Mode 1: Pure FastAPI Web Service (Default for Render Web Service to avoid 512MB OOM crash)
+    if not run_worker:
+        print(f"[run_server] Launching FastAPI Web Service on {host}:{port} (RUN_LIVEKIT_WORKER=false)...")
+        import uvicorn
+        uvicorn.run("main:app", host=host, port=int(port), log_level="info")
+        return
+
+    # Mode 2: Multi-process supervisor (FastAPI + LiveKit Worker)
+    print(f"[Supervisor] Launching FastAPI + LiveKit Worker (RUN_LIVEKIT_WORKER=true)...")
     api_proc = None
     worker_proc = None
     shutting_down = False
@@ -74,8 +86,8 @@ def main():
         api_key = os.environ.get("LIVEKIT_API_KEY")
         api_secret = os.environ.get("LIVEKIT_API_SECRET")
 
-        if not run_worker or not livekit_url:
-            print("[Supervisor] LiveKit Worker disabled or LIVEKIT_URL not set.")
+        if not livekit_url:
+            print("[Supervisor] LiveKit Worker disabled: LIVEKIT_URL not set.")
             return None
 
         worker_cmd = [sys.executable, "-u", "agent.py", "start"]

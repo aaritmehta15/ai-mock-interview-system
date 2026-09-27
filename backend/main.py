@@ -91,19 +91,19 @@ app.add_middleware(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Root — redirect to docs instead of 404
+# Root & Health Check Endpoints (Direct 200 OK, zero redirects)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.get("/", include_in_schema=False)
-async def root():
-    return RedirectResponse(url="/docs")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Health
-# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/", summary="Root health check", tags=["System"])
+async def root() -> dict:
+    return {
+        "status": "ok",
+        "module": "voice-interview",
+        "version": "2.1.0",
+    }
 
 @app.get("/health", summary="Health check", tags=["System"])
+@app.get("/api/health", summary="API Health check", tags=["System"])
 async def health() -> dict:
     return {
         "status": "ok",
