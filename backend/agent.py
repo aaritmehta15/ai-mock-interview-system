@@ -90,12 +90,12 @@ async def entrypoint(ctx: JobContext):
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     deepgram_key = os.getenv("DEEPGRAM_API_KEY")
     groq_key = os.getenv("GROQ_API_KEY")
+
     # Priority 1: Gemini Multimodal Live API (Direct Realtime Audio-to-Audio)
     if gemini_key:
-        logger.info("[agent] Initializing Gemini Multimodal Realtime Voice Model (model=gemini-2.0-flash-live-001, voice=%s)...", voice)
+        logger.info("[agent] Initializing Gemini Multimodal Realtime Voice Model (default model, voice=%s)...", voice)
         try:
             model = realtime.RealtimeModel(
-                model="gemini-2.0-flash-live-001",
                 api_key=gemini_key,
                 voice=voice,
                 instructions=instructions,
