@@ -90,16 +90,6 @@ async def entrypoint(ctx: JobContext):
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     deepgram_key = os.getenv("DEEPGRAM_API_KEY")
     groq_key = os.getenv("GROQ_API_KEY")
-
-    # Validate Gemini key format — Gemini AI Studio keys always start with "AIza"
-    if gemini_key and not gemini_key.startswith("AIza"):
-        logger.error(
-            "[agent] GEMINI_API_KEY looks invalid (expected 'AIza...' prefix, got '%s...'). "
-            "Get a real key from https://aistudio.google.com/app/apikey — falling back.",
-            gemini_key[:8]
-        )
-        gemini_key = None  # force fallback
-
     # Priority 1: Gemini Multimodal Live API (Direct Realtime Audio-to-Audio)
     if gemini_key:
         logger.info("[agent] Initializing Gemini Multimodal Realtime Voice Model (model=gemini-2.0-flash-live-001, voice=%s)...", voice)
