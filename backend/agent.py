@@ -26,6 +26,8 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
+from livekit.plugins.google.beta import realtime
+from livekit.plugins import deepgram, silero, openai
 from services.ledger_service import ledger_service
 from services.blueprint_service import get_blueprint, InterviewBlueprint
 from orchestrator.personas import (
@@ -91,7 +93,6 @@ async def entrypoint(ctx: JobContext):
     # Priority 1: Gemini Multimodal Live API (Direct Realtime Audio-to-Audio)
     if gemini_key:
         logger.info("[agent] Initializing Gemini Multimodal Realtime Voice Model (voice=%s)...", voice)
-        from livekit.plugins.google.beta import realtime
         model = realtime.RealtimeModel(
             api_key=gemini_key,
             voice=voice,
@@ -102,7 +103,6 @@ async def entrypoint(ctx: JobContext):
     elif deepgram_key:
         # Fallback: Deepgram STT + Groq LLM + Deepgram TTS
         logger.info("[agent] Initializing Deepgram STT + Groq LLM + Deepgram TTS pipeline...")
-        from livekit.plugins import deepgram, silero, openai
         groq_llm = openai.LLM(
             base_url="https://api.groq.com/openai/v1",
             api_key=os.getenv("GROQ_API_KEY"),
