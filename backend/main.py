@@ -201,16 +201,17 @@ async def create_blueprint_endpoint(req: BlueprintRequest):
     tags=["Blueprint"],
 )
 async def upload_resume_and_create_blueprint(
-    resume: UploadFile = File(...),
+    file: UploadFile = File(...),
     company: str = Form("Technology Firm"),
     role: str = Form("Software Engineer"),
     seniority: str = Form("Mid-Level"),
     jd_text: str = Form(""),
     session_id: Optional[str] = Form(None),
+    persona_id: str = Form("alex"),
 ):
     """Accepts PDF resume upload, extracts text via pypdf, and generates calibrated blueprint."""
     try:
-        contents = await resume.read()
+        contents = await file.read()
         extracted_text = extract_text_from_pdf(contents)
         bp = await generate_blueprint(
             company=company,

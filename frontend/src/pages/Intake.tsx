@@ -87,10 +87,17 @@ export default function Intake() {
       setBlueprint(bp);
     } catch (err: any) {
       console.error('[intake] Blueprint generation failed:', err);
-      setErrorMsg(
-        err.response?.data?.detail ||
-          'Failed to synthesize interview blueprint. Please verify backend status and try again.'
-      );
+      const detail = err.response?.data?.detail;
+      // Pydantic v2 returns detail as an array of {type, loc, msg, input} — must stringify
+      const errorString =
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+          ? detail.map((e: any) => e.msg || JSON.stringify(e)).join('; ')
+          : detail
+          ? JSON.stringify(detail)
+          : 'Failed to synthesize interview blueprint. Please verify backend status and try again.';
+      setErrorMsg(errorString);
     } finally {
       setIsGenerating(false);
     }
