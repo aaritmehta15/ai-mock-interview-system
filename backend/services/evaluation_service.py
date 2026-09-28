@@ -34,8 +34,8 @@ from backend.services.ledger_service import ledger_service
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-_groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+_DEFAULT_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+_groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
 
 
 async def evaluate_question_assertions(
@@ -106,7 +106,7 @@ Return ONLY valid JSON matching this schema:
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
-            max_tokens=1500,
+            max_tokens=400,
             response_format={"type": "json_object"}
         )
         raw = res.choices[0].message.content

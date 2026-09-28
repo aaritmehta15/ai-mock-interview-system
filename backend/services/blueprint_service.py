@@ -29,9 +29,8 @@ from backend.models.schemas import (
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Primary high-reasoning, token-efficient Groq model
-_DEFAULT_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-_groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+_DEFAULT_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+_groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
 
 # In-memory blueprint store (keyed by session_id and blueprint_id)
 _blueprint_store: Dict[str, InterviewBlueprint] = {}
@@ -157,9 +156,9 @@ Return ONLY valid JSON matching this schema:
 }}"""
 
     models_to_try = [
-        _DEFAULT_MODEL,
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant"
+        os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
     ]
 
     for model in models_to_try:
@@ -171,7 +170,7 @@ Return ONLY valid JSON matching this schema:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.2,
-                max_tokens=2200,
+                max_tokens=650,
                 response_format={"type": "json_object"}
             )
             raw = res.choices[0].message.content
