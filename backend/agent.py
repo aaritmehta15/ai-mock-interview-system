@@ -167,9 +167,11 @@ async def entrypoint(ctx: JobContext):
     agent = Agent(instructions=instructions_with_greeting)
     session = AgentSession(
         llm=model,
-        # Tighten endpointing: respond after 400ms silence instead of 800ms default
-        min_endpointing_delay=0.3,
-        max_endpointing_delay=0.6,
+        # Technical interview: candidates need time to think and give detailed answers.
+        # 0.3s was cutting off mid-sentence — 0.8s minimum gives candidates time to pause
+        # and structure complex technical responses without being interrupted.
+        min_endpointing_delay=0.8,
+        max_endpointing_delay=2.5,
     )
     logger.info("[agent] Gemini Multimodal Live model ready.")
 
