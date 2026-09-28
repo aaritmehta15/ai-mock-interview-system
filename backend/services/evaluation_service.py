@@ -171,7 +171,17 @@ async def evaluate_session(session_id: str) -> EvaluationReport:
     """
     turns = ledger_service.get_session_turns(session_id)
     blueprint = get_blueprint(session_id) or build_fallback_blueprint("Technology Firm", "Software Engineer")
-    asked_indices = ledger_service.get_asked_question_indices(session_id)
+    
+    # ── Pool all candidate speech ────────────────────────────────────────────
+    # Since Gemini Live manages the conversation autonomously without per-question
+    # index tracking, we evaluate the full candidate speech pool against each
+    # blueprint question. This avoids the "all questions UNREACHED" bug.
+    all_candidate_turns = [t for t in turns if t.speaker == TurnSpeaker.CANDIDATE]
+    all_candidate_text = " ".join(t.text for t in all_candidate_turns)
+    
+    # If we have per-question index data use it, otherwise treat all as reached
+    has_indexed_turns = any(t.question_index > 0 for t in turns)
+    asked_indices = ledger_service.get_asked_question_indices(session_id) if has_indexed_turns else None
     
     question_evaluations: List[QuestionEvaluation] = []
     total_weighted_score = 0.0
@@ -185,9 +195,10 @@ async def evaluate_session(session_id: str) -> EvaluationReport:
     unreached_count = 0
     
     for idx, question in enumerate(blueprint.questions):
-        # MATHEMATICAL ANTI-PHANTOM GUARANTEE:
-        # If question index was not voiced by the interviewer, mark as UNREACHED with weight 0.0
-        if idx not in asked_indices:
+        # ANTI-PHANTOM GUARANTEE:
+        # If index tracking is active and this question wasn't voiced, mark UNREACHED.
+        # If Gemini Live is handling the conversation (no indexing), all questions are REACHED.
+        if asked_indices is not None and idx not in asked_indices:
             question_evaluations.append(QuestionEvaluation(
                 question_id=question.id,
                 question_text=question.text,
@@ -200,13 +211,16 @@ async def evaluate_session(session_id: str) -> EvaluationReport:
             unreached_count += 1
             continue
 
-        # Gather candidate speech answering this specific question index
-        candidate_turns = [
-            t for t in turns
-            if t.speaker == TurnSpeaker.CANDIDATE and t.question_index == idx
-        ]
-        combined_candidate_text = " ".join(t.text for t in candidate_turns)
-        
+        # Use per-question turns if indexed, otherwise pool all candidate speech
+        if has_indexed_turns:
+            candidate_turns = [
+                t for t in turns
+                if t.speaker == TurnSpeaker.CANDIDATE and t.question_index == idx
+            ]
+            combined_candidate_text = " ".join(t.text for t in candidate_turns)
+        else:
+            combined_candidate_text = all_candidate_text
+
         # Evaluate assertions
         assertion_results = await evaluate_question_assertions(question, combined_candidate_text)
         

@@ -13,6 +13,8 @@ import json
 import logging
 import os
 import re
+import sqlite3
+from pathlib import Path
 from typing import Dict, List, Optional
 from pypdf import PdfReader
 from groq import AsyncGroq
@@ -32,21 +34,81 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 _groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
 
-# In-memory blueprint store (keyed by session_id and blueprint_id)
+# ── Blueprint Store: in-memory cache backed by SQLite persistence ──────────────
 _blueprint_store: Dict[str, InterviewBlueprint] = {}
+
+_BP_DB_PATH = os.getenv("LEDGER_DB_PATH", str(Path(__file__).resolve().parent.parent / "ledger.db"))
+
+
+def _get_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(_BP_DB_PATH, timeout=10.0, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_blueprint_table() -> None:
+    """Ensure the blueprint persistence table exists in the SQLite DB."""
+    conn = _get_db()
+    try:
+        with conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS blueprints (
+                    key TEXT PRIMARY KEY,
+                    blueprint_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+            """)
+    finally:
+        conn.close()
+
+
+_init_blueprint_table()
 
 
 def save_blueprint(session_id: str, blueprint: InterviewBlueprint) -> None:
-    """Store blueprint associated with a session or blueprint ID."""
+    """Store blueprint in memory AND persist to SQLite so it survives backend restarts."""
+    from datetime import datetime, timezone
     _blueprint_store[session_id] = blueprint
     _blueprint_store[blueprint.blueprint_id] = blueprint
+    # Persist to SQLite
+    bp_json = blueprint.model_dump_json()
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _get_db()
+    try:
+        with conn:
+            for key in (session_id, blueprint.blueprint_id):
+                conn.execute(
+                    "INSERT OR REPLACE INTO blueprints (key, blueprint_json, updated_at) VALUES (?, ?, ?)",
+                    (key, bp_json, now)
+                )
+    finally:
+        conn.close()
     logger.info("[blueprint] Stored blueprint %s for session %s (%d questions)",
                 blueprint.blueprint_id, session_id, len(blueprint.questions))
 
 
 def get_blueprint(session_id: str) -> Optional[InterviewBlueprint]:
-    """Retrieve blueprint by session_id or blueprint_id."""
-    return _blueprint_store.get(session_id)
+    """Retrieve blueprint from in-memory cache; fall back to SQLite persistence if missing."""
+    if session_id in _blueprint_store:
+        return _blueprint_store[session_id]
+    # Check SQLite persistence (survives backend restarts)
+    conn = _get_db()
+    try:
+        row = conn.execute(
+            "SELECT blueprint_json FROM blueprints WHERE key = ?",
+            (session_id,)
+        ).fetchone()
+        if row:
+            bp = InterviewBlueprint.model_validate_json(row["blueprint_json"])
+            _blueprint_store[session_id] = bp  # warm the cache
+            logger.info("[blueprint] Restored blueprint from SQLite for session %s (%d questions)",
+                        session_id, len(bp.questions))
+            return bp
+    except Exception as e:
+        logger.warning("[blueprint] SQLite restore failed for session %s: %s", session_id, e)
+    finally:
+        conn.close()
+    return None
 
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
@@ -170,7 +232,7 @@ Return ONLY valid JSON matching this schema:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.2,
-                max_tokens=650,
+                max_tokens=2000,  # 3 full questions + 3 assertions each = ~1400 tokens minimum
                 response_format={"type": "json_object"}
             )
             raw = res.choices[0].message.content
