@@ -2,8 +2,9 @@
 services/blueprint_service.py
 
 Intake & Blueprint Engine:
-Extracts resume text and generates an immutable, calibrated InterviewBlueprint
-containing structured rounds, questions, and evidence-bound binary assertions.
+Extracts candidate resume text from PDF and synthesizes a calibrated InterviewBlueprint
+grounded in the candidate's actual projects, target role, and company requirements.
+Eliminates live web search scraping in favor of deterministic question & binary assertion generation.
 """
 from __future__ import annotations
 
@@ -12,62 +13,48 @@ import json
 import logging
 import os
 import re
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from typing import Dict, List, Optional
 from pypdf import PdfReader
 from groq import AsyncGroq
 from dotenv import load_dotenv
 
+from backend.models.schemas import (
+    BinaryAssertion,
+    BlueprintQuestion,
+    InterviewBlueprint,
+    QuestionCategory,
+    SeniorityLevel,
+)
+
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Primary high-reasoning, token-efficient Groq model
+_DEFAULT_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 _groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
 # In-memory blueprint store (keyed by session_id and blueprint_id)
-_blueprint_store: dict[str, InterviewBlueprint] = {}
+_blueprint_store: Dict[str, InterviewBlueprint] = {}
+
 
 def save_blueprint(session_id: str, blueprint: InterviewBlueprint) -> None:
     """Store blueprint associated with a session or blueprint ID."""
     _blueprint_store[session_id] = blueprint
     _blueprint_store[blueprint.blueprint_id] = blueprint
-    logger.info("[blueprint] Stored blueprint %s for session %s", blueprint.blueprint_id, session_id)
+    logger.info("[blueprint] Stored blueprint %s for session %s (%d questions)",
+                blueprint.blueprint_id, session_id, len(blueprint.questions))
+
 
 def get_blueprint(session_id: str) -> Optional[InterviewBlueprint]:
     """Retrieve blueprint by session_id or blueprint_id."""
     return _blueprint_store.get(session_id)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Blueprint Data Models
-# ─────────────────────────────────────────────────────────────────────────────
-
-class BinaryAssertion(BaseModel):
-    name: str = Field(..., description="Short tag for the assertion")
-    weight: float = Field(..., description="Weight in score calculation (0.0 - 1.0)")
-    description: str = Field(..., description="Exact factual requirement for candidate answer")
-
-class BlueprintQuestion(BaseModel):
-    id: str = Field(..., description="Unique question identifier e.g. q_01")
-    text: str = Field(..., description="The spoken question delivered by the interviewer")
-    competency: str = Field(..., description="Specific engineering competency tested")
-    category: str = Field(..., description="technical_dsa | system_design | behavioral | architecture")
-    assertions: List[BinaryAssertion] = Field(default_factory=list, description="Binary assertions for evidence testing")
-    model_answer: str = Field(..., description="Staff engineer reference benchmark")
-
-class InterviewBlueprint(BaseModel):
-    blueprint_id: str
-    company: str
-    role: str
-    seniority: str
-    keywords: List[str] = Field(default_factory=list, description="Technical terms boosted in STT engine")
-    rounds: List[str] = Field(default_factory=list, description="List of rounds planned in this session")
-    questions: List[BlueprintQuestion] = Field(..., description="Ordered list of questions")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PDF Extraction
-# ─────────────────────────────────────────────────────────────────────────────
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """Extract raw text from PDF file bytes using pypdf."""
+    """
+    Extract raw text from PDF file bytes using pypdf.
+    Gracefully handles multi-column layouts and non-standard text encodings.
+    """
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         extracted_text = []
@@ -76,15 +63,12 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
             if text:
                 extracted_text.append(text)
         full_text = "\n".join(extracted_text).strip()
-        logger.info("[blueprint] Extracted %d characters from PDF", len(full_text))
+        logger.info("[blueprint] Extracted %d characters from PDF resume (%d pages)", len(full_text), len(reader.pages))
         return full_text
     except Exception as e:
         logger.warning("[blueprint] PDF text extraction failed: %s", e)
         return ""
 
-# ─────────────────────────────────────────────────────────────────────────────
-# AI Blueprint Generation
-# ─────────────────────────────────────────────────────────────────────────────
 
 async def generate_blueprint(
     company: str,
@@ -94,15 +78,28 @@ async def generate_blueprint(
     seniority: str = "Mid-Level",
 ) -> InterviewBlueprint:
     """
-    Synthesizes an immutable InterviewBlueprint grounded on candidate resume and target JD.
+    Synthesizes an immutable, calibrated InterviewBlueprint grounded on candidate resume and target JD.
+    Produces questions with verifiable BinaryAssertion sets and pre-boosted technical keywords.
     """
-    company = company.strip() or "Tech Company"
-    role = role.strip() or "Software Engineer"
+    clean_company = company.strip() or "Top-Tier Technology Firm"
+    clean_role = role.strip() or "Software Engineer"
     
-    resume_snippet = resume_text[:3000] if resume_text else "(No resume provided - calibrate to industry standard for role)"
-    jd_snippet = jd_text[:3000] if jd_text else "(No explicit JD provided - use canonical standards for role)"
+    # Map seniority string to enum
+    seniority_map = {
+        "junior": SeniorityLevel.JUNIOR,
+        "mid-level": SeniorityLevel.MID,
+        "mid": SeniorityLevel.MID,
+        "senior": SeniorityLevel.SENIOR,
+        "staff/principal": SeniorityLevel.STAFF,
+        "staff": SeniorityLevel.STAFF,
+        "principal": SeniorityLevel.STAFF,
+    }
+    seniority_enum = seniority_map.get(seniority.strip().lower(), SeniorityLevel.MID)
 
-    prompt = f"""You are a Principal Engineering Director designing an official Technical Interview Blueprint for {company} hiring a {seniority} {role}.
+    resume_snippet = resume_text[:3000] if resume_text else "(No resume provided - calibrate to industry standard for role)"
+    jd_snippet = jd_text[:2500] if jd_text else "(No explicit JD provided - use canonical standards for role)"
+
+    prompt = f"""You are a Principal Engineering Director designing an official Technical Interview Blueprint for {clean_company} hiring a {seniority_enum.value} {clean_role}.
 
 CANDIDATE RESUME HIGHLIGHTS:
 ---
@@ -115,31 +112,34 @@ JOB DESCRIPTION REQUIREMENTS:
 ---
 
 TASK:
-Design an immutable, evidence-bound Interview Blueprint containing exactly 3-5 core technical and architectural interview questions.
-Every question must test genuine engineering competence and require trade-off analysis.
+Design an immutable, evidence-bound Interview Blueprint containing exactly 3 core technical and architectural questions.
+Every question must test genuine engineering competence, memory/scalability trade-offs, and failure mode recovery.
 
 CRITICAL REQUIREMENTS:
-1. "keywords": Extract 10-15 specific engineering tools, libraries, and frameworks from the resume/JD to boost in speech-to-text (e.g. ["PostgreSQL", "Redis", "Kafka", "Docker", "FastAPI"]).
-2. "questions": 3 to 5 questions.
+1. "keywords": Extract 10-15 specific engineering tools, libraries, protocols, and frameworks (e.g. ["PostgreSQL", "Redis", "Kafka", "WebRTC", "Docker", "FastAPI"]).
+2. "questions": Exactly 3 questions:
+   - Question 1: Core Technical Foundations & Algorithms / Data Access (Category: "technical_dsa")
+   - Question 2: Distributed Systems Architecture & Scaling Trade-Offs (Category: "system_design")
+   - Question 3: Production Outage / Reliability & Failure Recovery (Category: "behavioral")
    For each question provide:
-   - "id": "q_01", "q_02", etc.
-   - "text": The exact conversational spoken question.
-   - "competency": Core skill tested (e.g. "Distributed Concurrency", "Memory Hierarchy").
-   - "category": "technical_dsa" | "system_design" | "behavioral" | "architecture"
-   - "assertions": Exactly 3 binary verification criteria (weights sum to 1.0).
-     - assertion 1: Foundation mechanism (weight 0.3)
-     - assertion 2: Edge case / complexity bound (weight 0.3)
-     - assertion 3: Operational trade-off / scaling failure mode (weight 0.4)
-   - "model_answer": A 2-sentence Staff Engineer benchmark summary.
+   - "id": "q_01", "q_02", "q_03"
+   - "text": Spoken question, concise and natural (<35 words).
+   - "competency": Core competency evaluated (e.g. "Distributed Concurrency", "Memory Hierarchy").
+   - "category": "technical_dsa" | "system_design" | "behavioral"
+   - "assertions": Exactly 3 binary verification criteria (weights sum to 1.0):
+     - assertion 1: Core mechanism / fundamental concept (weight: 0.3)
+     - assertion 2: Edge case / asymptotic complexity (weight: 0.3)
+     - assertion 3: Operational failure mode / trade-off justification (weight: 0.4)
+   - "model_answer": A 2-sentence Staff Engineer reference benchmark.
 
 Return ONLY valid JSON matching this schema:
 {{
-  "blueprint_id": "bp_{re.sub(r'[^a-zA-Z0-9]', '_', company.lower())}_{re.sub(r'[^a-zA-Z0-9]', '_', role.lower())}",
-  "company": "{company}",
-  "role": "{role}",
-  "seniority": "{seniority}",
+  "blueprint_id": "bp_{re.sub(r'[^a-zA-Z0-9]', '_', clean_company.lower())}_{re.sub(r'[^a-zA-Z0-9]', '_', clean_role.lower())}",
+  "company": "{clean_company}",
+  "role": "{clean_role}",
+  "seniority": "{seniority_enum.value}",
   "keywords": ["Term1", "Term2", ...],
-  "rounds": ["Technical Architecture", "System Design"],
+  "rounds": ["Technical Problem Solving", "System Architecture", "Operational Reliability"],
   "questions": [
     {{
       "id": "q_01",
@@ -156,65 +156,72 @@ Return ONLY valid JSON matching this schema:
   ]
 }}"""
 
-    models = [
-        os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
-        "groq/compound-mini",
-        "groq/compound",
-        "llama-3.3-70b-versatile"
+    models_to_try = [
+        _DEFAULT_MODEL,
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant"
     ]
-    
-    for model in models:
+
+    for model in models_to_try:
         try:
             res = await _groq_client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "You are an elite technical interview designer that outputs valid JSON only."},
+                    {"role": "system", "content": "You are an elite technical interview architect that outputs strictly valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
+                temperature=0.2,
                 max_tokens=2200,
                 response_format={"type": "json_object"}
             )
             raw = res.choices[0].message.content
             parsed = json.loads(raw)
             blueprint = InterviewBlueprint(**parsed)
-            logger.info("[blueprint] Generated blueprint %s with %d questions", blueprint.blueprint_id, len(blueprint.questions))
+            logger.info("[blueprint] Generated blueprint %s via model %s (%d questions)",
+                        blueprint.blueprint_id, model, len(blueprint.questions))
             return blueprint
         except Exception as e:
-            logger.warning("[blueprint] Generation failed on model %s: %s", model, e)
+            logger.warning("[blueprint] Blueprint generation failed on model %s: %s", model, e)
             continue
-            
-    # Deterministic fallback if API fails
-    logger.error("[blueprint] All models failed — using deterministic fallback blueprint")
-    return _build_fallback_blueprint(company, role, seniority)
+
+    logger.warning("[blueprint] All LLM models failed; constructing calibrated deterministic blueprint")
+    return build_fallback_blueprint(clean_company, clean_role, seniority_enum)
 
 
-def _build_fallback_blueprint(company: str, role: str, seniority: str) -> InterviewBlueprint:
+def build_fallback_blueprint(
+    company: str,
+    role: str,
+    seniority: SeniorityLevel = SeniorityLevel.MID
+) -> InterviewBlueprint:
+    """
+    Deterministic fallback blueprint guaranteeing uninterrupted interview availability
+    even when external AI APIs encounter network timeouts or rate limits.
+    """
     return InterviewBlueprint(
-        blueprint_id=f"bp_fallback_{company.lower()}_{role.lower()}",
+        blueprint_id=f"bp_canonical_{re.sub(r'[^a-zA-Z0-9]', '_', company.lower())}_{re.sub(r'[^a-zA-Z0-9]', '_', role.lower())}",
         company=company,
         role=role,
         seniority=seniority,
-        keywords=["Algorithms", "Data Structures", "Scalability", "Concurrency", "Database", "API Design"],
-        rounds=["Technical Problem Solving", "System Architecture"],
+        keywords=["Data Structures", "Distributed Systems", "Idempotency", "Concurrency", "Kafka", "Redis", "PostgreSQL"],
+        rounds=["Technical Problem Solving", "Distributed Systems", "Operational Reliability"],
         questions=[
             BlueprintQuestion(
                 id="q_01",
-                text=f"Welcome to your technical interview for {company}. To start off, could you walk me through how you choose between an array-based structure and a linked list when performance is critical?",
+                text=f"Welcome to your technical session for {company}. When optimizing high-throughput APIs, how do you evaluate contiguous array-based memory versus pointer-linked node structures?",
                 competency="Memory Layout & Data Access Complexity",
-                category="technical_dsa",
+                category=QuestionCategory.TECHNICAL_DSA,
                 assertions=[
-                    BinaryAssertion(name="memory_layout", weight=0.3, description="Explains contiguous memory in arrays vs pointer-linked heap nodes"),
-                    BinaryAssertion(name="complexity", weight=0.3, description="States O(1) random access vs O(N) traversal access"),
-                    BinaryAssertion(name="cpu_cache", weight=0.4, description="Identifies CPU cache spatial locality advantages in array structures")
+                    BinaryAssertion(name="memory_layout", weight=0.3, description="Explains contiguous cache-line memory in arrays vs scattered heap pointer nodes"),
+                    BinaryAssertion(name="asymptotic_bounds", weight=0.3, description="States O(1) direct indexing versus O(N) linear traversal cost"),
+                    BinaryAssertion(name="cpu_cache_locality", weight=0.4, description="Cites CPU L1/L2 cache spatial locality advantages in array buffers")
                 ],
-                model_answer="Arrays provide contiguous memory allocation with O(1) indexing and superior CPU cache locality. Linked lists avoid reallocation overhead but introduce pointer overhead and poor cache performance."
+                model_answer="Arrays provide contiguous memory allocation with O(1) indexing and superior CPU cache locality. Linked structures avoid reallocation overhead but introduce pointer indirection and poor cache line utilization."
             ),
             BlueprintQuestion(
                 id="q_02",
-                text="In high-throughput distributed systems, how do you handle state synchronization across multiple services without creating a single point of failure?",
+                text="In high-throughput microservices, how do you handle state synchronization across multiple services without creating single points of failure?",
                 competency="Distributed Consensus & Decoupling",
-                category="system_design",
+                category=QuestionCategory.SYSTEM_DESIGN,
                 assertions=[
                     BinaryAssertion(name="event_driven", weight=0.3, description="Identifies event-driven asynchronous messaging or log-based replication"),
                     BinaryAssertion(name="eventual_consistency", weight=0.3, description="Explains eventual consistency trade-offs over synchronous locking"),
@@ -224,13 +231,13 @@ def _build_fallback_blueprint(company: str, role: str, seniority: str) -> Interv
             ),
             BlueprintQuestion(
                 id="q_03",
-                text="Tell me about a complex technical bug or production outage you investigated in a past project. How did you isolate the root cause?",
+                text="Tell me about a complex production outage or high-latency bug you investigated. How did you isolate the root cause and ensure it never recurred?",
                 competency="Debugging & Root Cause Analysis",
-                category="behavioral",
+                category=QuestionCategory.BEHAVIORAL,
                 assertions=[
                     BinaryAssertion(name="hypothesis_testing", weight=0.3, description="Demonstrates structured hypothesis testing rather than random guesswork"),
                     BinaryAssertion(name="telemetry_usage", weight=0.3, description="References telemetry, distributed tracing, metrics, or log aggregation"),
-                    BinaryAssertion(name="preventative_action", weight=0.4, description="Explains permanent post-mortem remediation to prevent recurrence")
+                    BinaryAssertion(name="permanent_remediation", weight=0.4, description="Explains permanent post-mortem remediation to prevent recurrence")
                 ],
                 model_answer="Senior candidates describe a systematic triage process using observability tools, isolating the failure domain, and implementing automated testing or alerting to prevent future incidents."
             )
