@@ -1,130 +1,113 @@
 """
-main.py — Voice Mock Interview System (Module 2 standalone)
-
-Module 2: Voice Mock Interview System
-  - POST /interview/scrape-questions  → scrape + AI-generate question bank
-  - POST /interview/chat              → AI interviewer turn
-  - POST /interview/summary           → post-interview analysis
-
-Auth model (Firebase-native):
-  - User signs in via Firebase Auth → Google Sign-In popup on the frontend.
-  - Firebase returns a Google OAuth access token.
-  - Frontend sends it to every API call as:
-        Authorization: Bearer <google_access_token>
-
-Run:
-    uvicorn main:app --reload
-
-Docs:
-    http://localhost:8000/docs
+main.py — Production AI Mock Interview System API
+===================================================
+FastAPI REST service providing:
+  - System Health Checks (/health, /api/health)
+  - Calibrated Personas Catalogue (/api/personas)
+  - Intake & Blueprint Generation (/api/blueprint, /api/blueprint/upload)
+  - LiveKit WebRTC Access Token Dispenser (/api/token)
+  - Anti-Phantom Evidence Dossier Evaluation (/api/evaluate/{session_id})
+  - Cryptographic Session Turn Ledger Audit (/api/ledger/{session_id})
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from config import APP_ENV, LOG_LEVEL
+# Ensure repository root is on sys.path
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
-# ─── Module 2: Voice Interview imports ───────────────────────────────────────
-from scraper import scrape_questions
-from interviewer import chat as interview_chat, generate_summary
-from services import firebase_service
-from services.blueprint_service import generate_blueprint, extract_text_from_pdf, InterviewBlueprint
+from backend.config import APP_ENV, LOG_LEVEL
+from backend.models.schemas import (
+    EvaluationReport,
+    InterviewBlueprint,
+    PersonaProfile,
+    SeniorityLevel,
+    TurnEvent,
+    TurnSpeaker,
+)
+from backend.orchestrator.personas import get_persona, list_personas
+from backend.services.blueprint_service import (
+    build_fallback_blueprint,
+    extract_text_from_pdf,
+    generate_blueprint,
+    get_blueprint,
+    save_blueprint,
+)
+from backend.services.evaluation_service import evaluation_service
+from backend.services.ledger_service import ledger_service
 from livekit import api as livekit_api
-from utils.date_utils import today_utc
-import os
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Logging
-# ─────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     stream=sys.stdout,
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("interview.api")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Lifespan
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Lifespan Context Manager ────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("[START] Voice Mock Interview System starting (env=%s)", APP_ENV)
+    logger.info("[START] AI Mock Interview API starting (env=%s)", APP_ENV)
+    ledger_service.init_db()
     yield
-    logger.info("[STOP] Shutting down.")
+    logger.info("[STOP] AI Mock Interview API shut down cleanly.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# App
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Application Setup ────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Voice Mock Interview System",
-    description=(
-        "**Module 2 — Voice Mock Interview System**\n"
-        "POST /interview/scrape-questions → POST /interview/chat → POST /interview/summary"
-    ),
-    version="2.1.0",
+    title="AI Mock Interview System API",
+    description="Evidence-Grounded AI Technical Interviewer & Sound Studio REST API",
+    version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
+# Robust CORS configuration supporting both production Vercel frontend and local development
+CORS_ORIGINS = [
+    "https://ai-mock-interview-system-liart.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Root & Health Check Endpoints (Direct 200 OK, zero redirects)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.get("/", summary="Root health check", tags=["System"])
-async def root() -> dict:
-    return {
-        "status": "ok",
-        "module": "voice-interview",
-        "version": "2.1.0",
-    }
-
-@app.get("/health", summary="Health check", tags=["System"])
-@app.get("/api/health", summary="API Health check", tags=["System"])
-async def health() -> dict:
-    return {
-        "status": "ok",
-        "module": "voice-interview",
-        "version": "2.1.0",
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# LiveKit WebRTC & Blueprint Gateway Endpoints
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Request & Response Models ────────────────────────────────────────────────
 
 class TokenRequest(BaseModel):
-    room_name: str
-    participant_name: str
-    identity: Optional[str] = None
-    persona_id: Optional[str] = "alex"
+    room_name: str = Field(..., description="Unique LiveKit room name or session ID")
+    participant_name: str = Field(..., description="Candidate display name")
+    identity: Optional[str] = Field(None, description="Unique candidate identity")
+    persona_id: Optional[str] = Field("alex", description="Selected persona: alex | marcus | priya")
+
 
 class TokenResponse(BaseModel):
     token: str
     url: str
+
 
 class BlueprintRequest(BaseModel):
     company: str
@@ -135,62 +118,151 @@ class BlueprintRequest(BaseModel):
     session_id: Optional[str] = None
     persona_id: Optional[str] = "alex"
 
-class StepTurnRequest(BaseModel):
+
+class RecordTurnRequest(BaseModel):
     session_id: str
-    blueprint_id: str
-    persona_id: str = "alex"
-    candidate_utterance: str
-    current_question_index: int = 0
-    current_probe_count: int = 0
-    max_probes_per_question: int = 2
-    questions_total: int = 3
+    speaker: str
+    text: str
+    question_index: int = 0
+    confidence: float = 1.0
+
+
+# ─── System Health & Status Endpoints ─────────────────────────────────────────
+
+@app.get("/", summary="Root status check", tags=["System"])
+async def root() -> dict:
+    return {
+        "status": "ok",
+        "service": "ai-mock-interview-backend",
+        "version": "2.0.0",
+        "environment": APP_ENV,
+    }
+
+
+@app.get("/health", summary="Health check", tags=["System"])
+@app.get("/api/health", summary="API Health check alias", tags=["System"])
+async def health() -> dict:
+    return {
+        "status": "healthy",
+        "service": "ai-mock-interview-backend",
+        "version": "2.0.0",
+    }
+
+
+# ─── Personas Catalogue Endpoint ──────────────────────────────────────────────
 
 @app.get(
     "/api/personas",
+    response_model=List[PersonaProfile],
     summary="List all calibrated interviewer personas",
-    tags=["Orchestrator & Personas"],
+    tags=["Personas"],
 )
-async def list_personas_endpoint():
-    from orchestrator.personas import list_personas
+async def get_personas():
+    """Returns the 3 calibrated interviewer archetypes: Alex, Marcus, and Priya."""
     return list_personas()
 
+
+# ─── Intake & Blueprint Endpoints ─────────────────────────────────────────────
+
 @app.post(
-    "/api/orchestrator/step",
-    summary="Step LangGraph conversational state machine with candidate utterance",
-    tags=["Orchestrator & Personas"],
+    "/api/blueprint",
+    response_model=InterviewBlueprint,
+    summary="Synthesize calibrated Interview Blueprint from structured JSON",
+    tags=["Blueprint"],
 )
-async def step_turn_endpoint(req: StepTurnRequest):
-    from orchestrator.state_graph import step_interview_turn
+async def create_blueprint_endpoint(req: BlueprintRequest):
+    """Generates an evidence-bound blueprint with verifiable binary assertions."""
     try:
-        res = step_interview_turn(
-            session_id=req.session_id,
-            blueprint_id=req.blueprint_id,
-            persona_id=req.persona_id,
-            candidate_utterance=req.candidate_utterance,
-            current_question_index=req.current_question_index,
-            current_probe_count=req.current_probe_count,
-            max_probes_per_question=req.max_probes_per_question,
-            questions_total=req.questions_total,
+        bp = await generate_blueprint(
+            company=req.company,
+            role=req.role,
+            resume_text=req.resume_text,
+            jd_text=req.jd_text,
+            seniority=req.seniority,
         )
-        return res
+        save_blueprint(bp.blueprint_id, bp)
+        if req.session_id:
+            save_blueprint(req.session_id, bp)
+        return bp
     except Exception as e:
-        logger.error("[orchestrator] Error stepping turn: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("[api] Blueprint generation failed: %s", e)
+        fallback = build_fallback_blueprint(req.company, req.role)
+        save_blueprint(fallback.blueprint_id, fallback)
+        if req.session_id:
+            save_blueprint(req.session_id, fallback)
+        return fallback
+
+
+@app.post(
+    "/api/blueprint/upload",
+    response_model=InterviewBlueprint,
+    summary="Extract PDF resume and synthesize calibrated Interview Blueprint",
+    tags=["Blueprint"],
+)
+async def upload_resume_and_create_blueprint(
+    resume: UploadFile = File(...),
+    company: str = Form("Technology Firm"),
+    role: str = Form("Software Engineer"),
+    seniority: str = Form("Mid-Level"),
+    jd_text: str = Form(""),
+    session_id: Optional[str] = Form(None),
+):
+    """Accepts PDF resume upload, extracts text via pypdf, and generates calibrated blueprint."""
+    try:
+        contents = await resume.read()
+        extracted_text = extract_text_from_pdf(contents)
+        bp = await generate_blueprint(
+            company=company,
+            role=role,
+            resume_text=extracted_text,
+            jd_text=jd_text,
+            seniority=seniority,
+        )
+        save_blueprint(bp.blueprint_id, bp)
+        if session_id:
+            save_blueprint(session_id, bp)
+        return bp
+    except Exception as e:
+        logger.error("[api] PDF resume processing failed: %s", e)
+        fallback = build_fallback_blueprint(company, role)
+        save_blueprint(fallback.blueprint_id, fallback)
+        if session_id:
+            save_blueprint(session_id, fallback)
+        return fallback
+
+
+@app.get(
+    "/api/blueprint/{session_id}",
+    response_model=InterviewBlueprint,
+    summary="Retrieve active Interview Blueprint by session ID",
+    tags=["Blueprint"],
+)
+async def retrieve_blueprint_endpoint(session_id: str):
+    bp = get_blueprint(session_id)
+    if not bp:
+        logger.info("[api] No existing blueprint found for session %s; generating fallback", session_id)
+        bp = build_fallback_blueprint("Technology Firm", "Software Engineer")
+        save_blueprint(session_id, bp)
+    return bp
+
+
+# ─── LiveKit WebRTC Token Dispenser ───────────────────────────────────────────
 
 @app.post(
     "/api/token",
     response_model=TokenResponse,
     summary="Generate LiveKit WebRTC Room Access Token",
-    tags=["LiveKit WebRTC Gateway"],
+    tags=["LiveKit WebRTC"],
 )
-async def generate_livekit_token(req: TokenRequest):
+async def generate_token_endpoint(req: TokenRequest):
+    """Generates an authenticated JWT token for connecting to LiveKit Cloud."""
     url = os.getenv("LIVEKIT_URL", "")
     api_key = os.getenv("LIVEKIT_API_KEY", "")
     api_secret = os.getenv("LIVEKIT_API_SECRET", "")
 
     if not url or not api_key or not api_secret:
         raise HTTPException(
-            status_code=500,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="LiveKit credentials (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET) not configured.",
         )
 
@@ -217,270 +289,63 @@ async def generate_livekit_token(req: TokenRequest):
     return TokenResponse(token=token, url=url)
 
 
-@app.post(
-    "/api/blueprint",
-    response_model=InterviewBlueprint,
-    summary="Generate immutable Interview Blueprint from resume & JD",
-    tags=["LiveKit WebRTC Gateway"],
-)
-async def create_blueprint_endpoint(req: BlueprintRequest):
-    try:
-        from services.blueprint_service import save_blueprint
-        bp = await generate_blueprint(
-            company=req.company,
-            role=req.role,
-            resume_text=req.resume_text,
-            jd_text=req.jd_text,
-            seniority=req.seniority,
-        )
-        save_blueprint(bp.blueprint_id, bp)
-        if req.session_id:
-            save_blueprint(req.session_id, bp)
-        return bp
-    except Exception as e:
-        logger.error("[blueprint] Error generating blueprint: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get(
-    "/api/blueprint/{session_id}",
-    response_model=InterviewBlueprint,
-    summary="Retrieve an active Interview Blueprint by session or blueprint ID",
-    tags=["LiveKit WebRTC Gateway"],
-)
-async def get_blueprint_endpoint(session_id: str):
-    from services.blueprint_service import get_blueprint
-    bp = get_blueprint(session_id)
-    if not bp:
-        raise HTTPException(status_code=404, detail=f"Blueprint for '{session_id}' not found.")
-    return bp
-
+# ─── Evaluation & Turn Ledger Endpoints ───────────────────────────────────────
 
 @app.post(
     "/api/evaluate/{session_id}",
-    summary="Generate evidence-grounded performance dossier from Turn Ledger",
-    tags=["LiveKit WebRTC Gateway"],
+    response_model=EvaluationReport,
+    summary="Generate Staff Hiring Committee Evidence Dossier",
+    tags=["Evaluation"],
 )
 async def evaluate_session_endpoint(session_id: str):
-    from services.evaluation_service import generate_interview_dossier
+    """
+    Evaluates session based strictly on verified turns in the SQLite Turn Ledger.
+    Guaranteed mathematically against phantom questions.
+    """
     try:
-        dossier = await generate_interview_dossier(session_id)
-        return dossier
+        report = await evaluation_service.evaluate_session(session_id)
+        return report
     except Exception as e:
-        logger.error("[evaluation] Error generating dossier for %s: %s", session_id, e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Module 2 — Voice Mock Interview System
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── Pydantic models ──────────────────────────────────────────────────────────
-
-class ScrapeRequest(BaseModel):
-    company: str
-    role: str
-
-class ScrapeResponse(BaseModel):
-    questions: list[str]
-    source: str
-    count: int
-
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-class ChatRequest(BaseModel):
-    history: list[ChatMessage]
-    user_message: str
-    company: str
-    role: str
-    questions: list[str]
-    asked_questions: list[str] = []   # track what's been asked to prevent repeats
-
-class DimensionScore(BaseModel):
-    score: int = 0
-    evidence: str = ""
-    note: str = ""
-
-class FeedbackDetail(BaseModel):
-    # Core fields — always present (backward-compatible with frontend)
-    good: str = ""
-    missing: str = ""
-    improve: str = ""
-    # Dimension scores from Layer 4 evaluation rubric (new)
-    technical_accuracy: Optional[DimensionScore] = None
-    depth: Optional[DimensionScore] = None
-    communication: Optional[DimensionScore] = None
-    completeness: Optional[DimensionScore] = None
-
-class ChatResponse(BaseModel):
-    reply: str
-    feedback: Optional[FeedbackDetail] = None
-    next_question: str
-    # New fields from 6-layer architecture (ignored by old frontend code)
-    probe_followup: Optional[str] = None
-    interview_stage: Optional[str] = None
-
-
-class ImprovementArea(BaseModel):
-    area: str
-    advice: str
-
-class QuestionReview(BaseModel):
-    model_config = {"protected_namespaces": ()}
-    question: str
-    score: int
-    what_was_good: str
-    what_was_missing: str
-    model_answer_hint: str
-    # New evidence fields from two-pass summary architecture
-    competency_tested: Optional[str] = None
-    key_evidence: Optional[str] = None
-    scores: Optional[dict] = None
-
-class SummaryRequest(BaseModel):
-    user_id: str = "anonymous"
-    history: list[ChatMessage]
-    company: str
-    role: str
-    questions_asked: list[str]
-
-class SummaryResponse(BaseModel):
-    overall_score: int
-    overall_verdict: str
-    strengths: list[str]
-    weaknesses: list[str]
-    improvement_areas: list[ImprovementArea]
-    question_reviews: list[QuestionReview]
-    final_recommendation: str
-
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
-
-@app.post(
-    "/interview/scrape-questions",
-    response_model=ScrapeResponse,
-    summary="Scrape & generate interview questions for a company/role",
-    tags=["Voice Interview"],
-    status_code=status.HTTP_200_OK,
-)
-async def interview_scrape_endpoint(req: ScrapeRequest):
-    """
-    Scrapes DuckDuckGo / Bing / Google for real interview questions for the
-    given company and role, then refines + supplements them via Groq.
-
-    Call this first to get the question bank before starting `/interview/chat`.
-    """
-    if not req.company.strip():
-        raise HTTPException(status_code=400, detail="company cannot be empty")
-    if not req.role.strip():
-        raise HTTPException(status_code=400, detail="role cannot be empty")
-    result = await scrape_questions(req.company.strip(), req.role.strip())
-    return ScrapeResponse(**result)
-
-
-@app.post(
-    "/interview/chat",
-    response_model=ChatResponse,
-    summary="Send a candidate answer and receive AI interviewer feedback + next question",
-    tags=["Voice Interview"],
-    status_code=status.HTTP_200_OK,
-)
-async def interview_chat_endpoint(req: ChatRequest):
-    """
-    Powers the real-time mock interview loop.
-
-    - `history` — full conversation so far (excluding the system prompt)
-    - `user_message` — candidate's latest answer
-    - `asked_questions` — questions already covered (prevents repeats)
-
-    Returns `reply` (Alex's response), `feedback` (structured critique),
-    and `next_question` (empty string when all questions are exhausted).
-    """
-    if not req.user_message.strip():
-        raise HTTPException(status_code=400, detail="user_message cannot be empty")
-    if not req.questions:
+        logger.error("[api] Evaluation failed for session %s: %s", session_id, e)
         raise HTTPException(
-            status_code=400,
-            detail="questions array cannot be empty — call /interview/scrape-questions first",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Evaluation failed: {str(e)}"
         )
 
-    history_dicts = [msg.model_dump() for msg in req.history]
 
-    try:
-        result = await interview_chat(
-            history=history_dicts,
-            user_message=req.user_message.strip(),
-            company=req.company,
-            role=req.role,
-            questions=req.questions,
-            asked_questions=req.asked_questions,
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-
-    return ChatResponse(**result)
+@app.get(
+    "/api/ledger/{session_id}",
+    summary="Audit chronological turn ledger and cryptographic session hash",
+    tags=["Ledger"],
+)
+async def get_ledger_endpoint(session_id: str):
+    """Returns all chronological turns and SHA-256 session integrity digest."""
+    turns = ledger_service.get_session_turns(session_id)
+    session_hash = ledger_service.compute_session_hash(session_id)
+    asked_indices = list(ledger_service.get_asked_question_indices(session_id))
+    return {
+        "session_id": session_id,
+        "turns_count": len(turns),
+        "asked_question_indices": asked_indices,
+        "session_hash": session_hash,
+        "turns": turns,
+    }
 
 
 @app.post(
-    "/interview/summary",
-    response_model=SummaryResponse,
-    summary="Generate a detailed post-interview analysis",
-    tags=["Voice Interview"],
-    status_code=status.HTTP_200_OK,
+    "/api/ledger/turn",
+    response_model=TurnEvent,
+    summary="Record a turn event into the SQLite Turn Ledger",
+    tags=["Ledger"],
 )
-async def interview_summary_endpoint(req: SummaryRequest):
-    """
-    Generate a detailed post-interview analysis from the full conversation
-    history. Call this when the interview ends.
-
-    Returns overall score, strengths, weaknesses, etc.
-    Persists the score to the user's performance history in Firebase.
-    """
-    if len([m for m in req.history if m.role != "system"]) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail="Not enough interview data to generate a summary.",
-        )
-
-    history_dicts = [msg.model_dump() for msg in req.history]
-
-    try:
-        result = await generate_summary(
-            history=history_dicts,
-            company=req.company,
-            role=req.role,
-            questions_asked=req.questions_asked,
-        )
-
-        # Persist the score for performance tracking
-        try:
-            await firebase_service.log_performance_score(
-                req.user_id, today_utc().isoformat(), result["overall_score"]
-            )
-        except Exception as e:
-            logger.warning("Failed to log interview score to performance history: %s", e)
-
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-
-    return SummaryResponse(**result)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Global exception handler
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Any, exc: Exception) -> JSONResponse:
-    if isinstance(exc, HTTPException):
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-
-    logger.exception("Unhandled exception on %s: %s", request.url, exc)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "An internal server error occurred."},
+async def record_turn_endpoint(req: RecordTurnRequest):
+    """Explicitly records a spoken turn into the append-only ledger."""
+    speaker_enum = TurnSpeaker.CANDIDATE if req.speaker.lower() in ("candidate", "user") else TurnSpeaker.INTERVIEWER
+    turn = ledger_service.record_turn(
+        session_id=req.session_id,
+        speaker=speaker_enum,
+        text=req.text,
+        question_index=req.question_index,
+        confidence=req.confidence,
     )
+    return turn
