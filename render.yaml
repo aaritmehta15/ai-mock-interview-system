@@ -3,7 +3,7 @@ services:
   # Web Service: FastAPI REST API (Blueprints, Token Dispenser, Dossier Evaluation)
   # ─────────────────────────────────────────────────────────────────────────────
   - type: web
-    name: daazling-interview-api
+    name: apex-interview-api
     env: python
     region: oregon
     plan: free
@@ -36,7 +36,7 @@ services:
   # Handles real-time WebRTC audio streaming, Silero VAD, and Gemini Multimodal
   # ─────────────────────────────────────────────────────────────────────────────
   - type: worker
-    name: daazling-livekit-worker
+    name: apex-livekit-worker
     env: python
     region: oregon
     plan: starter

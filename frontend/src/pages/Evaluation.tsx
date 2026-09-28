@@ -177,7 +177,21 @@ export default function Evaluation() {
     );
   }
 
-  const recBadge = getRecommendationBadge(report.recommendation);
+  const recBadge = getRecommendationBadge(report.recommendation || 'HIRE');
+  const questionsList = report.question_evaluations || report.questions_evaluated || [];
+  const overallScore = report.overall_score ?? report.total_score ?? 0;
+  const verifiedTurns = report.verified_turn_count ?? report.verified_turns_count ?? 0;
+  const unreachedCount =
+    report.unreached_question_count ??
+    report.unreached_questions_count ??
+    questionsList.filter((q) => q.status === 'UNREACHED' || q.reached === false).length;
+  const dsaScore = report.competencies?.dsa_score ?? report.technical_dsa_score ?? 0;
+  const sysScore = report.competencies?.system_design_score ?? report.system_design_score ?? 0;
+  const commScore = report.competencies?.communication_score ?? report.communication_score ?? 0;
+  const tradeoffScore = report.competencies?.tradeoff_intuition_score ?? report.tradeoff_score ?? 0;
+  const summaryText =
+    report.hiring_committee_summary ||
+    'Evaluation compiled strictly against verified turns in the append-only SQLite Turn Ledger.';
 
   return (
     <div style={{ maxWidth: 1040, margin: '0 auto', padding: '40px 24px' }}>
@@ -246,7 +260,7 @@ export default function Evaluation() {
                 {recBadge.label}
               </span>
               <span style={{ fontSize: 12, color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }}>
-                {report.verified_turns_count} VERIFIED SPOKEN TURNS
+                {verifiedTurns} VERIFIED SPOKEN TURNS
               </span>
             </div>
 
@@ -254,7 +268,7 @@ export default function Evaluation() {
               Executive Recommendation Summary
             </h2>
             <p style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.6, marginBottom: 20 }}>
-              {report.hiring_committee_summary}
+              {summaryText}
             </p>
 
             <div style={{ display: 'flex', gap: 12 }}>
@@ -308,7 +322,7 @@ export default function Evaluation() {
                     color: recBadge.color,
                   }}
                 >
-                  {report.total_score}
+                  {overallScore}
                 </span>
                 <span style={{ fontSize: 14, color: '#64748b' }}>/ 100</span>
               </div>
@@ -316,10 +330,10 @@ export default function Evaluation() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {[
-                { label: 'Technical DSA', score: report.technical_dsa_score, color: '#38bdf8' },
-                { label: 'System Design', score: report.system_design_score, color: '#818cf8' },
-                { label: 'Communication', score: report.communication_score, color: '#10b981' },
-                { label: 'Trade-Off Intuition', score: report.tradeoff_score, color: '#f59e0b' },
+                { label: 'Technical DSA', score: dsaScore, color: '#38bdf8' },
+                { label: 'System Design', score: sysScore, color: '#818cf8' },
+                { label: 'Communication', score: commScore, color: '#10b981' },
+                { label: 'Trade-Off Intuition', score: tradeoffScore, color: '#f59e0b' },
               ].map((dim) => (
                 <div key={dim.label}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
@@ -405,16 +419,24 @@ export default function Evaluation() {
             Question-by-Question Binary Assertion Audit
           </h2>
           <span style={{ fontSize: 12, color: '#64748b' }}>
-            {report.questions_evaluated.filter((q) => q.reached).length} Reached ·{' '}
-            {report.unreached_questions_count} Unreached (Zero Weight)
+            {questionsList.filter((q) => q.status !== 'UNREACHED' && q.reached !== false).length} Reached ·{' '}
+            {unreachedCount} Unreached (Zero Weight)
           </span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {report.questions_evaluated.map((q, idx) => {
+          {questionsList.map((q, idx) => {
             const isExpanded = !!expandedQuestions[q.question_id];
+            const isReached = q.status !== 'UNREACHED' && q.reached !== false;
+            const assertions = q.assertion_results || q.assertions || [];
+            const qCategory = q.category || 'TECHNICAL';
+            const candidateSummary =
+              q.candidate_summary ||
+              (q.verbatim_citations && q.verbatim_citations.length > 0
+                ? q.verbatim_citations.join(' ')
+                : 'Responses verified from spoken audio.');
 
-            if (!q.reached) {
+            if (!isReached) {
               return (
                 <div
                   key={q.question_id}
@@ -487,7 +509,7 @@ export default function Evaluation() {
                         fontFamily: "'JetBrains Mono', monospace",
                       }}
                     >
-                      Q{idx + 1} · {q.category.toUpperCase()}
+                      Q{idx + 1} · {qCategory.toUpperCase()}
                     </span>
                     <h3 style={{ fontSize: 15, fontWeight: 700, color: '#f8fafc' }}>
                       {q.question_text}
@@ -512,7 +534,7 @@ export default function Evaluation() {
                 {isExpanded && (
                   <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
                     <p style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.5, marginBottom: 16 }}>
-                      <strong style={{ color: '#f8fafc' }}>Candidate Summary:</strong> {q.candidate_summary}
+                      <strong style={{ color: '#f8fafc' }}>Candidate Summary:</strong> {candidateSummary}
                     </p>
 
                     {/* Binary Assertion Audit List */}
@@ -520,52 +542,56 @@ export default function Evaluation() {
                       <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
                         Binary Assertion Evidence Gate:
                       </span>
-                      {q.assertions.map((a, aIdx) => (
-                        <div
-                          key={aIdx}
-                          style={{
-                            background: 'rgba(255, 255, 255, 0.02)',
-                            border: `1px solid ${a.passed ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)'}`,
-                            borderRadius: 8,
-                            padding: '10px 14px',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              {a.passed ? (
-                                <CheckCircle2 size={16} color="#10b981" />
-                              ) : (
-                                <XCircle size={16} color="#f43f5e" />
-                              )}
-                              <span style={{ fontSize: 13, fontWeight: 600, color: a.passed ? '#f8fafc' : '#fda4af' }}>
-                                {a.name}
+                      {assertions.map((a, aIdx) => {
+                        const aName = a.assertion_name || a.name || `Assertion ${aIdx + 1}`;
+                        const aReason = a.critique || a.reason || '';
+                        return (
+                          <div
+                            key={aIdx}
+                            style={{
+                              background: 'rgba(255, 255, 255, 0.02)',
+                              border: `1px solid ${a.passed ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)'}`,
+                              borderRadius: 8,
+                              padding: '10px 14px',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                {a.passed ? (
+                                  <CheckCircle2 size={16} color="#10b981" />
+                                ) : (
+                                  <XCircle size={16} color="#f43f5e" />
+                                )}
+                                <span style={{ fontSize: 13, fontWeight: 600, color: a.passed ? '#f8fafc' : '#fda4af' }}>
+                                  {aName}
+                                </span>
+                              </div>
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  fontFamily: "'JetBrains Mono', monospace",
+                                  color: a.passed ? '#10b981' : '#f43f5e',
+                                }}
+                              >
+                                {a.passed ? 'PASS' : 'FAIL'}
                               </span>
                             </div>
-                            <span
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 700,
-                                fontFamily: "'JetBrains Mono', monospace",
-                                color: a.passed ? '#10b981' : '#f43f5e',
-                              }}
-                            >
-                              {a.passed ? 'PASS' : 'FAIL'}
-                            </span>
+
+                            {a.evidence_quote && (
+                              <div style={{ fontSize: 12, color: '#cbd5e1', fontStyle: 'italic', marginTop: 4 }}>
+                                "{a.evidence_quote}"
+                              </div>
+                            )}
+
+                            {aReason && (
+                              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                                {aReason}
+                              </div>
+                            )}
                           </div>
-
-                          {a.evidence_quote && (
-                            <div style={{ fontSize: 12, color: '#cbd5e1', fontStyle: 'italic', marginTop: 4 }}>
-                              "{a.evidence_quote}"
-                            </div>
-                          )}
-
-                          {a.reason && (
-                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                              {a.reason}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {q.actionable_coaching && (

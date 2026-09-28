@@ -107,6 +107,7 @@ class TokenRequest(BaseModel):
 class TokenResponse(BaseModel):
     token: str
     url: str
+    server_url: Optional[str] = None
 
 
 class BlueprintRequest(BaseModel):
@@ -286,7 +287,7 @@ async def generate_token_endpoint(req: TokenRequest):
         .to_jwt()
     )
 
-    return TokenResponse(token=token, url=url)
+    return TokenResponse(token=token, url=url, server_url=url)
 
 
 # ─── Evaluation & Turn Ledger Endpoints ───────────────────────────────────────

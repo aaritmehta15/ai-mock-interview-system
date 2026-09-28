@@ -63,38 +63,65 @@ export type Persona = PersonaProfile;
 
 export interface AssertionResult {
   name: string;
+  assertion_name?: string;
   passed: boolean;
   score: number;
   evidence_quote: string;
   reason: string;
+  critique?: string;
+}
+
+export interface CompetencyScore {
+  dsa_score: number;
+  system_design_score: number;
+  communication_score: number;
+  tradeoff_intuition_score: number;
 }
 
 export interface QuestionEvaluation {
   question_id: string;
   question_text: string;
-  category: string;
-  reached: boolean;
+  status?: string;
+  category?: string;
+  reached?: boolean;
   score: number;
-  assertions: AssertionResult[];
-  candidate_summary: string;
-  actionable_coaching: string;
+  weight?: number;
+  assertion_results?: {
+    assertion_name?: string;
+    name?: string;
+    passed: boolean;
+    evidence_quote?: string;
+    critique?: string;
+    reason?: string;
+    score?: number;
+  }[];
+  assertions?: AssertionResult[];
+  verbatim_citations?: string[];
+  candidate_summary?: string;
+  actionable_coaching?: string;
 }
 
 export interface EvaluationReport {
   session_id: string;
-  blueprint_id: string;
-  evaluated_at: string;
-  total_score: number;
-  recommendation: 'STRONG HIRE' | 'HIRE' | 'LEAN HIRE' | 'NO HIRE';
-  hiring_committee_summary: string;
-  technical_dsa_score: number;
-  system_design_score: number;
-  communication_score: number;
-  tradeoff_score: number;
-  questions_evaluated: QuestionEvaluation[];
-  verified_turns_count: number;
-  unreached_questions_count: number;
+  overall_score?: number;
+  total_score?: number;
+  recommendation: 'STRONG HIRE' | 'HIRE' | 'LEAN HIRE' | 'NO HIRE' | string;
+  hiring_committee_summary?: string;
+  competencies?: CompetencyScore;
+  technical_dsa_score?: number;
+  system_design_score?: number;
+  communication_score?: number;
+  tradeoff_score?: number;
+  question_evaluations?: QuestionEvaluation[];
+  questions_evaluated?: QuestionEvaluation[];
+  verified_turn_count?: number;
+  verified_turns_count?: number;
+  unreached_question_count?: number;
+  unreached_questions_count?: number;
   session_hash: string;
+  created_at?: string;
+  evaluated_at?: string;
+  blueprint_id?: string;
 }
 
 export interface TurnEvent {
