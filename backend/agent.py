@@ -2,19 +2,43 @@
 agent.py
 
 LiveKit Real-Time Voice Agent Worker:
-Connects full-duplex WebRTC audio streams to Google Gemini Multimodal Live API
-(with high-velocity Groq Llama-3.3-70b fallback).
+Connects full-duplex WebRTC audio streams to Google Gemini Multimodal Live API.
 Autonomously initiates interview by greeting first as the selected persona.
 Enforces thread-based execution to prevent Linux memory bloat.
 Logs all spoken exchanges to the Append-Only SQLite Turn Ledger.
+
+Performance fixes applied:
+  - Pre-warm all slow imports at module load time (anyio, numpy, ssl) to prevent
+    event-loop blocking stalls (828ms+ stalls observed in logs).
+  - Gemini Live session uses generate_reply() for the greeting (say() requires TTS
+    model; RealtimeModel does not provide a separate TTS pipeline).
+  - RealtimeModel configured with fastest available model and endpointing tuned for
+    low-latency turn detection.
 """
 from __future__ import annotations
+
+# ── Pre-warm imports that block the event loop on first use ────────────────────
+# These imports trigger slow native library loading. Doing them at module level
+# means the cost is paid at startup, not during a live audio session.
+import ssl as _ssl_prewarm
+try:
+    _ssl_prewarm.create_default_context()  # forces SSL context construction once
+except Exception:
+    pass
+
+import anyio  # noqa: F401 — forces anyio._core._sockets import before the loop runs
+try:
+    import numpy.fft  # noqa: F401 — forces numpy FFT native extension load
+except ImportError:
+    pass
+# ──────────────────────────────────────────────────────────────────────────────
 
 import asyncio
 import json
 import logging
 import os
 import sys
+from typing import Optional
 from dotenv import load_dotenv
 
 # Ensure repository root is on sys.path
@@ -24,9 +48,13 @@ if BASE_DIR not in sys.path:
 
 load_dotenv()
 logger = logging.getLogger("interview.agent")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    encoding="utf-8",  # prevents UnicodeEncodeError on non-Latin transcripts
+)
 
-from livekit import rtc
+from livekit import rtc  # noqa: F401 — keep for type-checking downstream
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -47,7 +75,10 @@ from backend.orchestrator.personas import (
 )
 
 
-def build_system_instructions(bp: Optional[InterviewBlueprint] = None, persona: Optional[PersonaProfile] = None) -> str:
+def build_system_instructions(
+    bp: Optional[InterviewBlueprint] = None,
+    persona: Optional[PersonaProfile] = None,
+) -> str:
     """Build grounded, persona-calibrated system prompt from active Blueprint."""
     active_persona = persona or ALEX_EMPATHETIC_LEAD
     active_bp = bp or build_fallback_blueprint("Technology Firm", "Software Engineer")
@@ -74,54 +105,58 @@ async def entrypoint(ctx: JobContext):
         logger.warning("[agent] Metadata parse failed: %s; using default persona", e)
 
     persona = get_persona(persona_id)
-    logger.info("[agent] Active persona: %s (%s) | Voice: %s | Max Words: %d",
-                persona.name, persona.title, persona.voice_model, persona.max_words)
-    instructions = build_system_instructions(bp, persona)
+    logger.info(
+        "[agent] Active persona: %s (%s) | Voice: %s | Max Words: %d",
+        persona.name, persona.title, persona.voice_model, persona.max_words,
+    )
 
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    groq_key = os.getenv("GROQ_API_KEY")
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Primary Voice Pipeline: Gemini Multimodal Live API (Direct Audio-to-Audio)
+    # Build greeting — embedded directly into system instructions so Gemini
+    # Live delivers it as its FIRST utterance via generate_reply().
     # ─────────────────────────────────────────────────────────────────────────
-    model = None
-    if gemini_key:
-        logger.info("[agent] Initializing Gemini Multimodal Live API (Voice=%s)...", persona.voice_model)
-        try:
-            model = realtime.RealtimeModel(
-                api_key=gemini_key,
-                voice=persona.voice_model,
-                instructions=instructions,
-            )
-            agent = Agent(instructions=instructions)
-            session = AgentSession(llm=model)
-            logger.info("[agent] Gemini Multimodal Live model ready.")
-        except Exception as e:
-            logger.error("[agent] Gemini Live initialization failed: %s — falling back to Groq.", e)
-            gemini_key = None
+    greeting_text = (
+        f"Hi there! I'm {persona.name}, {persona.title}. "
+        "Welcome to your technical interview session with Apex. "
+        f"{persona.signature_phrase} "
+        "Whenever you're ready, let me know and we'll dive right into our first question."
+    )
 
-    # Fallback Pipeline: Groq Llama-3.3-70b (sub-400ms TTFT)
+    # Inject the greeting as the literal first turn in the system instructions.
+    # This ensures Gemini Live speaks it as part of session setup — zero latency
+    # waiting for a user turn to trigger the first response.
+    instructions = build_system_instructions(bp, persona)
+    instructions_with_greeting = (
+        instructions
+        + f"\n\n---\nSESSION START: When the session begins, your VERY FIRST spoken output must be exactly:\n\"{greeting_text}\"\nThen wait for the candidate to respond."
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Primary Voice Pipeline: Gemini Multimodal Live API
+    # Using gemini-live-2.5-flash-native-audio — the fastest LiveAPI model.
+    # ─────────────────────────────────────────────────────────────────────────
     if not gemini_key:
-        if not groq_key:
-            raise ValueError("No valid AI API key found. Please provide GEMINI_API_KEY or GROQ_API_KEY in backend/.env.")
-        
-        from livekit.plugins import deepgram, silero, openai
-        logger.info("[agent] Initializing Groq Fallback Pipeline (LLM=llama-3.3-70b-versatile)...")
-        groq_llm = openai.LLM(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=groq_key,
-            model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
-        )
-        vad = silero.VAD.load()
-        deepgram_key = os.getenv("DEEPGRAM_API_KEY")
-        if deepgram_key:
-            stt = deepgram.STT()
-            tts = deepgram.TTS()
-            agent = Agent(instructions=instructions)
-            session = AgentSession(stt=stt, vad=vad, llm=groq_llm, tts=tts)
-        else:
-            agent = Agent(instructions=instructions)
-            session = AgentSession(vad=vad, llm=groq_llm)
+        raise ValueError("GEMINI_API_KEY is required. Set it in backend/.env.")
+
+    logger.info("[agent] Initializing Gemini Multimodal Live API (model=gemini-live-2.5-flash-native-audio, voice=%s)...", persona.voice_model)
+
+    model = realtime.RealtimeModel(
+        api_key=gemini_key,
+        model="gemini-live-2.5-flash-native-audio",  # fastest native audio model
+        voice=persona.voice_model,
+        instructions=instructions_with_greeting,
+        # Tune endpointing for lower latency:
+        # Shorter silence detection = faster response after candidate stops talking
+    )
+    agent = Agent(instructions=instructions_with_greeting)
+    session = AgentSession(
+        llm=model,
+        # Tighten endpointing: respond after 400ms silence instead of 800ms default
+        min_endpointing_delay=0.3,
+        max_endpointing_delay=0.6,
+    )
+    logger.info("[agent] Gemini Multimodal Live model ready.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Real-Time Ledger Synchronization Hooks
@@ -131,7 +166,8 @@ async def entrypoint(ctx: JobContext):
         transcript = getattr(event, "transcript", "").strip()
         is_final = getattr(event, "is_final", False)
         if transcript and is_final:
-            logger.info("[ledger] Candidate speech recorded (%d words): %s", len(transcript.split()), transcript[:60])
+            word_count = len(transcript.split())
+            logger.info("[ledger] Candidate speech recorded (%d words)", word_count)
             ledger_service.record_turn(
                 session_id=session_id,
                 speaker=TurnSpeaker.CANDIDATE,
@@ -147,7 +183,7 @@ async def entrypoint(ctx: JobContext):
             text = getattr(item, "text_content", "") or getattr(item, "content", "")
             if isinstance(text, str) and text.strip():
                 if role in ("assistant", "agent"):
-                    logger.info("[ledger] Interviewer spoken turn recorded: %s", text[:60])
+                    logger.info("[ledger] Interviewer spoken turn recorded (%d words)", len(text.split()))
                     ledger_service.record_turn(
                         session_id=session_id,
                         speaker=TurnSpeaker.INTERVIEWER,
@@ -160,40 +196,32 @@ async def entrypoint(ctx: JobContext):
     logger.info("[agent] WebRTC session active in room %s", ctx.room.name)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Autonomous Opening Greeting: Interviewer ALWAYS speaks first
+    # Autonomous Opening Greeting: Interviewer ALWAYS speaks first.
+    # With RealtimeModel, session.say() requires a TTS model — instead we use
+    # generate_reply() which triggers Gemini Live to produce the first spoken
+    # response immediately, delivering the greeting from the instructions.
     # ─────────────────────────────────────────────────────────────────────────
-    # Check if participant is already connected, or await incoming participant
     participant = None
     if ctx.room.remote_participants:
         participant = next(iter(ctx.room.remote_participants.values()))
-        logger.info("[agent] Found existing participant in room: %s (%s)", participant.identity, participant.name)
+        logger.info("[agent] Found existing participant in room: %s", participant.identity)
     else:
         logger.info("[agent] Awaiting candidate connection...")
         participant = await ctx.wait_for_participant()
-        logger.info("[agent] Candidate connected: %s (%s)", participant.identity, participant.name)
+        logger.info("[agent] Candidate connected: %s", participant.identity)
 
-    # Brief 500ms grace sleep to allow candidate WebRTC audio playback track to negotiate
-    await asyncio.sleep(0.5)
+    # Brief 300ms grace sleep (reduced from 500ms) to allow WebRTC audio negotiation
+    await asyncio.sleep(0.3)
 
-    greeting_text = (
-        f"Hi {participant.name or 'there'}! I'm {persona.name}, {persona.title}. "
-        "Welcome to your technical session. Whenever you're ready, let me know and we'll dive right into our first question."
-    )
-
+    logger.info("[agent] Triggering autonomous opening greeting as %s...", persona.name)
     try:
-        logger.info("[agent] Delivering autonomous opening greeting as %s...", persona.name)
-        handle = session.say(greeting_text)
+        handle = session.generate_reply(
+            user_input="Session started. Begin the interview with your opening greeting now.",
+        )
         await handle
         logger.info("[agent] Autonomous opening greeting delivered successfully.")
     except Exception as e:
-        logger.error("[agent] session.say() greeting failed: %s — trying generate_reply fallback", e)
-        try:
-            handle = session.generate_reply(
-                user_input="The candidate has entered the room. Greet them warmly and introduce the first question."
-            )
-            await handle
-        except Exception as e2:
-            logger.error("[agent] generate_reply fallback failed: %s", e2)
+        logger.error("[agent] generate_reply greeting failed: %s", e)
 
     logger.info("[agent] Listening for candidate audio stream...")
 
@@ -211,8 +239,23 @@ def main():
             ws_url=url,
             api_key=api_key,
             api_secret=api_secret,
+            # Pre-warm the agent process so imports don't block on first job
+            prewarm_fnc=_prewarm,
         )
     )
+
+
+def _prewarm(proc):
+    """Pre-warm the agent process: trigger all slow imports before the first job."""
+    logger.info("[agent] Pre-warming imports...")
+    try:
+        import numpy.fft  # noqa: F401
+        import anyio  # noqa: F401
+        import ssl
+        ssl.create_default_context()
+        logger.info("[agent] Pre-warm complete.")
+    except Exception as e:
+        logger.warning("[agent] Pre-warm partial failure (non-fatal): %s", e)
 
 
 if __name__ == "__main__":
