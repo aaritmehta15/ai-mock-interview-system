@@ -39,7 +39,7 @@ function RoomControls({
     if (!localParticipant) return;
     const interval = setInterval(() => {
       setIsSpeaking(localParticipant.isSpeaking);
-      const agent = remoteParticipants.find(p => p.identity.includes('agent') || p.identity.includes('daazling') || true);
+      const agent = remoteParticipants.find(p => p.identity.includes('agent') || p.identity.includes('interviewer') || true);
       if (agent) {
         setAgentSpeaking(agent.isSpeaking);
       }
@@ -217,10 +217,10 @@ function RoomControls({
             color: agentSpeaking ? '#a5b4fc' : isSpeaking ? '#fda4af' : 'var(--text-2, #a0aec0)',
           }}>
             {agentSpeaking
-              ? `🎙️ ${persona?.name?.toUpperCase() || 'DAAZLING'} IS SPEAKING`
+              ? `🎙️ ${persona?.name?.toUpperCase() || 'APEX INTERVIEWER'} IS SPEAKING`
               : isSpeaking
               ? '🗣️ CANDIDATE SPEAKING'
-              : `👂 ${persona?.name?.toUpperCase() || 'DAAZLING'} IS LISTENING`}
+              : `👂 ${persona?.name?.toUpperCase() || 'APEX INTERVIEWER'} IS LISTENING`}
           </span>
           <p style={{ fontSize: 13, color: 'var(--text-3, #7a8290)', margin: '8px 0 0' }}>
             {persona

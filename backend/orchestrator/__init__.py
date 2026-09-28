@@ -1,1 +1,1 @@
-"""DAAZLING Orchestrator Package - Personas & LangGraph State Machine."""
+"""Apex Orchestrator Package - Staff Personas & Sweet-Spot Engine."""

@@ -3,29 +3,34 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Mic,
   LayoutDashboard,
-  Layers,
-  LogOut,
-  LogIn,
-  Activity,
+  Compass,
+  FileText,
+  Users,
   ShieldCheck,
+  LogOut,
+  Activity,
   ChevronRight,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const NAV_ITEMS = [
-  { to: '/interview', icon: Mic, label: 'Voice Studio', badge: 'LiveKit' },
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Candidate Dashboard' },
-  { to: '/', icon: Layers, label: 'System Architecture' },
+  { to: '/tour', icon: Compass, label: 'Platform Tour', badge: 'Start' },
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Trajectory Hub' },
+  { to: '/intake', icon: FileText, label: 'Resume Blueprint', badge: 'PDF' },
+  { to: '/personas', icon: Users, label: 'Staff Personas', badge: '3 Staff' },
+  { to: '/interview', icon: Mic, label: 'Voice Sound Studio', badge: 'LiveKit' },
+  { to: '/evaluation', icon: ShieldCheck, label: 'Hiring Dossier' },
 ];
 
 export default function Sidebar() {
-  const { user, signInWithGoogle, logout } = useAuth();
+  const { user, fastPassLogin, logout } = useAuth();
   const navigate = useNavigate();
   const [imgError, setImgError] = useState(false);
 
   const handleLogout = async () => {
     await logout();
-    navigate('/');
+    navigate('/login');
   };
 
   const initials = user?.displayName
@@ -35,15 +40,15 @@ export default function Sidebar() {
         .join('')
         .toUpperCase()
         .slice(0, 2)
-    : 'RC'; // Recruiter / Candidate
+    : 'AP';
 
   return (
     <aside
       style={{
         width: 260,
         height: '100vh',
-        background: '#0a0d14',
-        borderRight: '1px solid rgba(255, 255, 255, 0.08)',
+        background: '#090b10',
+        borderRight: '1px solid rgba(255, 255, 255, 0.07)',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
@@ -83,7 +88,7 @@ export default function Sidebar() {
                     letterSpacing: '-0.02em',
                   }}
                 >
-                  DAAZLING
+                  APEX
                 </span>
                 <span
                   style={{
@@ -97,11 +102,11 @@ export default function Sidebar() {
                     fontWeight: 600,
                   }}
                 >
-                  v2.2
+                  v2.4
                 </span>
               </div>
               <p style={{ fontSize: 11, color: '#64748b', margin: '2px 0 0' }}>
-                Evidence-Grounded Voice AI
+                Technical Voice Assessment OS
               </p>
             </div>
           </div>
@@ -119,7 +124,7 @@ export default function Sidebar() {
               padding: '6px 10px',
             }}
           >
-            Engineering Suite
+            Assessment Pipeline
           </span>
           {NAV_ITEMS.map(({ to, icon: Icon, label, badge }) => (
             <NavLink key={to} to={to} style={{ textDecoration: 'none' }}>
@@ -164,13 +169,13 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        {/* Telemetry Status Box */}
+        {/* Architecture Specs Box */}
         <div style={{ padding: '0 12px', marginTop: 12 }}>
           <div
             style={{
               padding: 12,
-              background: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid rgba(255, 255, 255, 0.06)',
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
               borderRadius: 12,
               display: 'flex',
               flexDirection: 'column',
@@ -190,32 +195,42 @@ export default function Sidebar() {
                     boxShadow: '0 0 8px #10b981',
                   }}
                 />
-                LiveKit Cloud
+                LiveKit WebRTC
               </span>
-              <span style={{ color: '#10b981', fontWeight: 600 }}>Active</span>
+              <span style={{ color: '#10b981', fontWeight: 600 }}>Sub-650ms</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <ShieldCheck size={12} color="#818cf8" />
-                Turn Ledger
+                SQLite Ledger
               </span>
-              <span style={{ color: '#818cf8', fontWeight: 600 }}>0-Phantom</span>
+              <span style={{ color: '#818cf8', fontWeight: 600 }}>SHA-256</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Activity size={12} color="#38bdf8" />
-                LangGraph
+                Interviewer First
               </span>
-              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Cyclical</span>
+              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Autonomous</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* Bottom Profile / Auth / Guest Status */}
-      <div style={{ padding: 14, borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+      <div style={{ padding: 14, borderTop: '1px solid rgba(255, 255, 255, 0.07)' }}>
         {user ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, borderRadius: 10, background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: 8,
+              borderRadius: 10,
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid rgba(255, 255, 255, 0.06)',
+            }}
+          >
             {user.photoURL && !imgError ? (
               <img
                 src={user.photoURL}
@@ -252,7 +267,7 @@ export default function Sidebar() {
                   textOverflow: 'ellipsis',
                 }}
               >
-                {user.displayName || 'Engineer'}
+                {user.displayName || 'Staff Candidate'}
               </div>
               <div
                 style={{
@@ -267,6 +282,7 @@ export default function Sidebar() {
               </div>
             </div>
             <button
+              type="button"
               onClick={handleLogout}
               title="Sign out"
               style={{
@@ -287,12 +303,23 @@ export default function Sidebar() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}>
               <span style={{ fontSize: 11, color: '#94a3b8' }}>Session Mode</span>
-              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.25)', fontFamily: "'JetBrains Mono', monospace" }}>
-                Guest Recruiter
+              <span
+                style={{
+                  fontSize: 10,
+                  padding: '1px 6px',
+                  borderRadius: 4,
+                  background: 'rgba(56, 189, 248, 0.1)',
+                  color: '#38bdf8',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}
+              >
+                Guest Explorer
               </span>
             </div>
             <button
-              onClick={signInWithGoogle}
+              type="button"
+              onClick={() => fastPassLogin('Staff Candidate')}
               style={{
                 width: '100%',
                 display: 'flex',
@@ -301,16 +328,16 @@ export default function Sidebar() {
                 gap: 8,
                 padding: '8px 12px',
                 borderRadius: 8,
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: '#f1f5f9',
+                background: 'rgba(99, 102, 241, 0.15)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                color: '#c7d2fe',
                 fontSize: 12,
                 fontWeight: 600,
                 cursor: 'pointer',
               }}
             >
-              <LogIn size={13} color="#818cf8" />
-              Sign in with Google
+              <Zap size={13} color="#818cf8" />
+              1-Click Fast Pass
             </button>
           </div>
         )}

@@ -57,7 +57,7 @@ export default function Landing() {
               <Mic size={18} />
             </div>
             <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em' }}>
-              DAAZLING
+              APEX
             </span>
             <span
               style={{
@@ -179,7 +179,7 @@ export default function Landing() {
               lineHeight: 1.65,
             }}
           >
-            Real engineering interviews aren't simple text prompts. DAAZLING pairs candidates with
+            Real engineering interviews aren't simple text prompts. Apex pairs candidates with
             calibrated interviewer personas over live WebRTC voice audio, backed by an append-only Turn Ledger
             guaranteeing zero phantom questions.
           </motion.p>
@@ -524,8 +524,8 @@ export default function Landing() {
       {/* Modern Engineering Footer */}
       <footer style={{ borderTop: '1px solid rgba(255, 255, 255, 0.06)', padding: '32px 0', fontSize: 12, color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }}>
         <div className="studio-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <span>DAAZLING · Flagship AI Technical Interviewer</span>
-          <span>LiveKit WebRTC · Gemini Realtime · LangGraph</span>
+          <span>APEX · Flagship Autonomous AI Technical Interviewer</span>
+          <span>LiveKit WebRTC · Gemini Realtime · SQLite Ledger</span>
         </div>
       </footer>
     </div>

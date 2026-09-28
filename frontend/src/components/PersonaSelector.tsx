@@ -171,7 +171,7 @@ export default function PersonaSelector({
                   >
                     {persona.name
                       .split(' ')
-                      .map((n) => n[0])
+                      .map((n: string) => n[0])
                       .join('')}
                   </div>
                   <div style={{ minWidth: 0, paddingRight: isSelected ? 80 : 0 }}>
@@ -225,7 +225,7 @@ export default function PersonaSelector({
 
                 {/* Behavioral Traits */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-                  {persona.traits.map((trait, idx) => (
+                  {persona.traits?.map((trait: string, idx: number) => (
                     <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#94a3b8' }}>
                       <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#64748b', marginTop: 7, flexShrink: 0 }} />
                       <span style={{ lineHeight: 1.4 }}>{trait}</span>
@@ -249,10 +249,10 @@ export default function PersonaSelector({
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <HelpCircle size={12} color="#64748b" />
-                  Pause: {persona.pause_tolerance_seconds}s
+                  Pause: {persona.pause_tolerance_seconds ?? persona.pause_tolerance ?? 3}s
                 </span>
                 <span style={{ color: '#94a3b8' }}>
-                  {persona.probe_style.split('&')[0].trim()}
+                  {(persona.probe_style || 'Socratic Assessment').split('&')[0].trim()}
                 </span>
               </div>
             </motion.div>

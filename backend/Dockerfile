@@ -1,6 +1,4 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# DAAZLING AI Mock Interview System — Production Backend & LiveKit Agent Dockerfile
-# ─────────────────────────────────────────────────────────────────────────────
+# Apex AI Mock Interview System — Production Backend & LiveKit Agent Dockerfile
 FROM python:3.11-slim
 
 # Avoid buffering stdout/stderr

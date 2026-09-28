@@ -12,71 +12,172 @@ export function clearAuthToken() {
   delete api.defaults.headers.common['Authorization'];
 }
 
-// ── Module 2 — Voice Mock Interview ─────────────────────────────────────────
-export const scrapeInterviewQuestions = (company: string, role: string) =>
-  api.post('/interview/scrape-questions', { company, role }).then(r => r.data);
+// ── Schemas & Type Definitions ──────────────────────────────────────────────
+export interface BinaryAssertion {
+  name: string;
+  weight: number;
+  description: string;
+}
 
-export const interviewChat = (payload: object) =>
-  api.post('/interview/chat', payload).then(r => r.data);
+export interface BlueprintQuestion {
+  id: string;
+  text: string;
+  competency: string;
+  category: 'technical_dsa' | 'system_design' | 'behavioral';
+  assertions: BinaryAssertion[];
+  model_answer: string;
+  target_seconds: number;
+}
 
-export const interviewSummary = (payload: object) =>
-  api.post('/interview/summary', payload).then(r => r.data);
+export interface InterviewBlueprint {
+  blueprint_id: string;
+  company: string;
+  role: string;
+  seniority: string;
+  keywords: string[];
+  questions: BlueprintQuestion[];
+  created_at?: string;
+}
 
-export interface Persona {
+export interface PersonaProfile {
   id: string;
   name: string;
   title: string;
-  archetype: string;
-  badge_label: string;
+  difficulty: 'accessible' | 'adversarial' | 'rigorous';
   accent_color: string;
-  difficulty: string;
-  tagline: string;
-  pause_tolerance_seconds: number;
-  thinking_pause_seconds: number;
-  probe_style: string;
-  traits: string[];
-  system_tone_prompt?: string;
+  voice_model: string;
+  pause_tolerance: number;
+  thinking_delay: number;
+  max_words: number;
+  signature_phrase: string;
+  archetype?: string;
+  pause_tolerance_seconds?: number;
+  thinking_pause_seconds?: number;
+  tagline?: string;
+  badge_label?: string;
+  probe_style?: string;
+  traits?: string[];
 }
 
-// ── LiveKit WebRTC & Blueprint Gateway ────────────────────────────────────────
-export const getPersonas = (): Promise<Persona[]> =>
-  api.get('/api/personas').then(r => r.data);
+export type Persona = PersonaProfile;
 
-export const stepTurn = (payload: {
+export interface AssertionResult {
+  name: string;
+  passed: boolean;
+  score: number;
+  evidence_quote: string;
+  reason: string;
+}
+
+export interface QuestionEvaluation {
+  question_id: string;
+  question_text: string;
+  category: string;
+  reached: boolean;
+  score: number;
+  assertions: AssertionResult[];
+  candidate_summary: string;
+  actionable_coaching: string;
+}
+
+export interface EvaluationReport {
   session_id: string;
   blueprint_id: string;
-  persona_id: string;
-  candidate_utterance: string;
-  current_question_index: number;
-  current_probe_count: number;
-  max_probes_per_question?: number;
-  questions_total?: number;
-}) => api.post('/api/orchestrator/step', payload).then(r => r.data);
+  evaluated_at: string;
+  total_score: number;
+  recommendation: 'STRONG HIRE' | 'HIRE' | 'LEAN HIRE' | 'NO HIRE';
+  hiring_committee_summary: string;
+  technical_dsa_score: number;
+  system_design_score: number;
+  communication_score: number;
+  tradeoff_score: number;
+  questions_evaluated: QuestionEvaluation[];
+  verified_turns_count: number;
+  unreached_questions_count: number;
+  session_hash: string;
+}
 
-export const getLiveKitToken = (
-  room_name: string,
-  participant_name: string,
-  identity?: string,
-  persona_id: string = 'alex'
-) => api.post('/api/token', { room_name, participant_name, identity, persona_id }).then(r => r.data);
+export interface TurnEvent {
+  turn_id: string;
+  session_id: string;
+  speaker: string;
+  role: string;
+  question_index: number;
+  text: string;
+  word_count: number;
+  confidence: number;
+  timestamp: string;
+  verified: boolean;
+}
+
+export interface LedgerAuditResponse {
+  session_id: string;
+  turns_count: number;
+  asked_question_indices: number[];
+  session_hash: string;
+  turns: TurnEvent[];
+}
+
+// ── API Methods ─────────────────────────────────────────────────────────────
+export const health = () => api.get('/health').then(r => r.data);
+
+export const getPersonas = (): Promise<PersonaProfile[]> =>
+  api.get('/api/personas').then(r => r.data);
 
 export const createBlueprint = (payload: {
   company: string;
   role: string;
   seniority?: string;
   resume_text?: string;
-  jd_text?: string;
   session_id?: string;
   persona_id?: string;
-}) => api.post('/api/blueprint', payload).then(r => r.data);
+}): Promise<InterviewBlueprint> => api.post('/api/blueprint', payload).then(r => r.data);
 
-export const getBlueprint = (session_id: string) =>
-  api.get(`/api/blueprint/${session_id}`).then(r => r.data);
+export const uploadResumePdf = async (
+  file: File,
+  company: string,
+  role: string,
+  seniority: string = 'Senior',
+  sessionId?: string,
+  personaId: string = 'alex'
+): Promise<InterviewBlueprint> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('company', company);
+  formData.append('role', role);
+  formData.append('seniority', seniority);
+  if (sessionId) formData.append('session_id', sessionId);
+  formData.append('persona_id', personaId);
 
-export const evaluateSession = (session_id: string) =>
-  api.post(`/api/evaluate/${session_id}`).then(r => r.data);
+  const res = await api.post('/api/blueprint/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.data;
+};
 
-// ── Health ───────────────────────────────────────────────────────────────────
-export const health = () => api.get('/health').then(r => r.data);
+export const getBlueprint = (sessionId: string): Promise<InterviewBlueprint> =>
+  api.get(`/api/blueprint/${sessionId}`).then(r => r.data);
+
+export const getLiveKitToken = (payload: {
+  room_name: string;
+  participant_name: string;
+  identity?: string;
+  persona_id?: string;
+}): Promise<{ token: string; server_url: string; room_name: string; participant_name: string }> =>
+  api.post('/api/token', payload).then(r => r.data);
+
+export const evaluateSession = (sessionId: string): Promise<EvaluationReport> =>
+  api.post(`/api/evaluate/${sessionId}`).then(r => r.data);
+
+export const getLedger = (sessionId: string): Promise<LedgerAuditResponse> =>
+  api.get(`/api/ledger/${sessionId}`).then(r => r.data);
+
+export const recordTurn = (payload: {
+  session_id: string;
+  speaker: string;
+  text: string;
+  question_index?: number;
+  confidence?: number;
+}): Promise<TurnEvent> => api.post('/api/ledger/turn', payload).then(r => r.data);
 
 export default api;

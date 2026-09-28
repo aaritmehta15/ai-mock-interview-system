@@ -1,7 +1,7 @@
 """
 prewarm.py
 
-Keep-alive and pre-warming utility for DAAZLING cloud deployments.
+Keep-alive and pre-warming utility for Apex cloud deployments.
 Pings backend API health and persona endpoints on a regular interval
 to prevent container spin-down on free/sleep-tier hosts (Render, Koyeb, Railway).
 
@@ -41,13 +41,13 @@ def ping_endpoint(client: httpx.Client, base_url: str, endpoint: str) -> bool:
         return False
 
 def main():
-    parser = argparse.ArgumentParser(description="DAAZLING Backend Pre-Warm & Keep-Alive Daemon")
+    parser = argparse.ArgumentParser(description="Apex Backend Pre-Warm & Keep-Alive Daemon")
     parser.add_argument("--url", default=os.getenv("TARGET_API_URL", "http://localhost:8000"), help="Base URL of backend API")
     parser.add_argument("--interval", type=int, default=840, help="Interval between pings in seconds (default: 840s / 14m)")
     parser.add_argument("--once", action="store_true", help="Ping once and exit (for cron jobs / CI triggers)")
     args = parser.parse_args()
 
-    print(f"=== DAAZLING Pre-Warm Daemon Started ===")
+    print(f"=== Apex Pre-Warm Daemon Started ===")
     print(f"Target Base URL : {args.url}")
     print(f"Ping Interval   : {args.interval}s")
     print(f"Single Shot     : {args.once}")
