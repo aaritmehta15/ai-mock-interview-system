@@ -143,7 +143,7 @@ async def entrypoint(ctx: JobContext):
 
     model = realtime.RealtimeModel(
         api_key=gemini_key,
-        model="gemini-live-2.5-flash-native-audio",  # fastest native audio model
+        model="gemini-2.5-flash-native-audio-preview-12-2025",  # fastest Gemini API native audio model
         voice=persona.voice_model,
         instructions=instructions_with_greeting,
         # Tune endpointing for lower latency:
