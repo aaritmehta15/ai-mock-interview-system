@@ -11,7 +11,14 @@
 ORIGINAL_BRIEF.md
 CHECKLIST.md
 PLAN.md
+MASTER_PROJECT_PROMPT.md
+*PROMPT*.md
+*prompt*.md
+*.prompt
 testing_integration_guide.md
+scratch/
+scratch_*
+recovered_*
 
 # Firebase & Google Cloud
 firebase_credentials*.json
