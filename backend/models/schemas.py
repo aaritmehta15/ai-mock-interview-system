@@ -1,229 +1,148 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
-
-from pydantic import BaseModel, Field, field_validator
-
-
-# ── Enums ──────────────────────────────────────────────────────────────────────
-
-class EventType(str, Enum):
-    placement_drive    = "placement_drive"
-    aptitude_test      = "aptitude_test"
-    college_exam       = "college_exam"
-    internship_deadline = "internship_deadline"
-    college_quiz       = "college_quiz"
-    assignment         = "assignment"
+from typing import List, Optional
+from pydantic import BaseModel, Field
 
 
-class CompanyTier(str, Enum):
-    Tier1   = "Tier1"
-    Tier2   = "Tier2"
-    Tier3   = "Tier3"
-    Unknown = "Unknown"
+# ── Core Enums ────────────────────────────────────────────────────────────────
+
+class SeniorityLevel(str, Enum):
+    JUNIOR = "Junior"
+    MID = "Mid-Level"
+    SENIOR = "Senior"
+    STAFF = "Staff/Principal"
 
 
-# ── Raw email ──────────────────────────────────────────────────────────────────
-
-class RawEmail(BaseModel):
-    id: str
-    subject: str
-    body: str
-    sender: str
-    received_at: str          # ISO-8601
+class QuestionCategory(str, Enum):
+    TECHNICAL_DSA = "technical_dsa"
+    SYSTEM_DESIGN = "system_design"
+    BEHAVIORAL = "behavioral"
 
 
-# ── Company intelligence ───────────────────────────────────────────────────────
-
-class CompanyProfile(BaseModel):
-    """Enriched company data attached to an event."""
-    raw_name: str             # as extracted from the email
-    normalized_name: str      # after normalisation (title-case, trademark stripped)
-    tier: CompanyTier
-    tier_reason: str
-    source: str               # "groq" | "heuristic"
+class HiringRecommendation(str, Enum):
+    STRONG_HIRE = "STRONG HIRE"
+    HIRE = "HIRE"
+    BORDERLINE = "BORDERLINE"
+    NO_HIRE = "NO HIRE"
 
 
-# ── Student profile (stored in Firebase: users/{userId}/profile) ───────────────
-
-class StudentProfile(BaseModel):
-    user_id: str
-    name: Optional[str] = None
-    email: Optional[str] = None
-    photoURL: Optional[str] = None
-    branch: Optional[str] = None
-    year: Optional[str] = None
-    cgpa: Optional[float] = None
-    targetCompanies: list[str] = Field(default_factory=list, alias="target_companies")
-    skills: list[str] = Field(default_factory=list)
-    preferredRoles: list[str] = Field(default_factory=list, alias="preferred_roles")
-    # "high_package" | "learning" | "stability"
-    priorityBias: str = Field(default="high_package", alias="priority_bias")
-    updatedAt: Optional[str] = None
-
-    model_config = {
-        "populate_by_name": True,
-        "extra": "allow"
-    }
+class TurnSpeaker(str, Enum):
+    CANDIDATE = "candidate"
+    INTERVIEWER = "interviewer"
 
 
-# ── Extracted structured event ─────────────────────────────────────────────────
+# ── Blueprint & Assertion Models ─────────────────────────────────────────────
 
-class ExtractedEvent(BaseModel):
-    eventType: EventType
-    title: str
-    company: Optional[str]          = None
-    company_profile: Optional[CompanyProfile] = None
-    date: Optional[str]             = None   # "YYYY-MM-DD"
-    time: Optional[str]             = None
-    marks: Optional[float]          = None
-    source_email_id: Optional[str]  = None
-
-
-# ── Scored / ranked event ──────────────────────────────────────────────────────
-
-class ScoredEvent(BaseModel):
-    eventType: EventType
-    title: str
-    company: Optional[str]          = None
-    company_profile: Optional[CompanyProfile] = None
-    date: Optional[str]             = None
-    time: Optional[str]             = None
-    marks: Optional[float]          = None
-    priority_score: float
-    score_breakdown: dict           = Field(default_factory=dict)
-    days_until: Optional[int]       = None
-    source_email_id: Optional[str]  = None
+class BinaryAssertion(BaseModel):
+    """
+    Deterministic factual or architectural assertion that a candidate must demonstrate.
+    Eliminates subjective score drift by reducing grading to verifiable binary criteria.
+    """
+    name: str = Field(..., description="Unique machine-readable assertion identifier, e.g. 'mentions_idempotency_key'")
+    weight: float = Field(..., ge=0.0, le=1.0, description="Relative weight of this assertion within the question (sums to 1.0)")
+    description: str = Field(..., description="Exact verifiable factual requirement the candidate must state or explain")
 
 
-# ── Daily plan ─────────────────────────────────────────────────────────────────
-
-class HourlyBlock(BaseModel):
-    hours: float
-    task: str
-    reason: str
-
-
-class DailyPlan(BaseModel):
-    focus_verdict: str
-    reason: str
-    hourly_breakdown: list[HourlyBlock]
-    skip_today: list[str]   = Field(default_factory=list)
-    warning: str            = ""
+class BlueprintQuestion(BaseModel):
+    """
+    A single calibrated technical interview question.
+    """
+    id: str = Field(..., description="Unique question ID, e.g. 'q_01'")
+    text: str = Field(..., description="Concise spoken question (<35 words)")
+    competency: str = Field(..., description="Core engineering competency evaluated, e.g. 'Distributed Systems & Concurrency'")
+    category: QuestionCategory = Field(default=QuestionCategory.SYSTEM_DESIGN)
+    assertions: List[BinaryAssertion] = Field(default_factory=list, description="List of verifiable binary criteria")
+    model_answer: str = Field(..., description="Staff Engineer reference benchmark answer")
 
 
-# ── API response shapes ────────────────────────────────────────────────────────
-
-class GeneratePlanResponse(BaseModel):
-    sorted_events: list[ScoredEvent]
-    daily_plan: DailyPlan
-    generated_at: str
-
-
-class LogStudyRequest(BaseModel):
-    user_id: str   = Field(..., min_length=1, max_length=128)
-    date: str      = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
-    hours_studied: float = Field(..., ge=0, le=24)
-
-    @field_validator("hours_studied")
-    @classmethod
-    def round_hours(cls, v: float) -> float:
-        return round(v, 2)
-
-
-class LogStudyResponse(BaseModel):
-    user_id: str
-    date: str
-    hours_studied: float
-    message: str
-
-
-# ── Student profile update request ────────────────────────────────────────────
-
-class UpdateProfileRequest(BaseModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
-    photoURL: Optional[str] = None
-    branch: Optional[str] = None
-    year: Optional[str] = None
-    cgpa: Optional[float] = None
-    targetCompanies: list[str]  = Field(default_factory=list, alias="target_companies")
-    skills: list[str]            = Field(default_factory=list)
-    preferredRoles: list[str]   = Field(default_factory=list, alias="preferred_roles")
-    priorityBias: str           = Field(default="high_package", alias="priority_bias")
-    updatedAt: Optional[str]     = None
-
-    model_config = {
-        "populate_by_name": True,
-        "extra": "allow"
-    }
-
-    @field_validator("priorityBias", mode="before")
-    @classmethod
-    def validate_bias(cls, v: str) -> str:
-        allowed = {"high_package", "learning", "stability"}
-        if v not in allowed:
-            raise ValueError(f"priorityBias must be one of {allowed}")
-        return v
-
-
-# ── Module 4: Resume & Apply Links ────────────────────────────────────────────
-
-class ResumeProject(BaseModel):
-    name: str
-    tech: list[str] = Field(default_factory=list)
-    description: str = ""
-
-
-class ResumeProfile(BaseModel):
-    """Parsed resume profile stored at users/{userId}/profile/resume."""
-    name: str = ""
-    skills: list[str] = Field(default_factory=list)
-    projects: list[ResumeProject] = Field(default_factory=list)
-    experience: list[str] = Field(default_factory=list)
-    preferredRoles: list[str] = Field(default_factory=list)
-    targetCompanies: list[str] = Field(default_factory=list)
-
-
-class UploadResumeResponse(BaseModel):
-    user_id: str
-    profile: ResumeProfile
-    message: str
-
-
-class ApplyLink(BaseModel):
-    """Single apply opportunity returned by GET /apply-links."""
+class InterviewBlueprint(BaseModel):
+    """
+    Complete interview roadmap generated during the intake phase from resume + JD.
+    """
+    blueprint_id: str
     company: str
     role: str
-    url: str
-    whyFit: str = ""
-    difficulty: str = "Medium"   # Easy | Medium | Hard
+    seniority: SeniorityLevel = SeniorityLevel.MID
+    keywords: List[str] = Field(default_factory=list, description="Pre-boosted technical speech vocabulary for STT")
+    rounds: List[str] = Field(default_factory=lambda: ["System Architecture", "Trade-Off Analysis"])
+    questions: List[BlueprintQuestion] = Field(default_factory=list)
 
 
-class ApplyLinksResponse(BaseModel):
-    user_id: str
-    links: list[ApplyLink]
-    total: int
+# ── Cryptographic Turn Ledger Models ─────────────────────────────────────────
+
+class TurnEvent(BaseModel):
+    """
+    Immutable spoken turn recorded in the append-only SQLite Turn Ledger.
+    """
+    turn_id: str = Field(..., description="Unique turn ID, e.g. 'turn_c94e7c15ba'")
+    session_id: str = Field(..., description="Session/room identifier")
+    speaker: TurnSpeaker
+    role: str = Field(default="candidate")
+    question_index: int = Field(default=0)
+    text: str = Field(..., description="Verbatim speech transcript")
+    word_count: int = Field(default=0)
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    timestamp: str = Field(..., description="ISO 8601 UTC timestamp")
+    verified: bool = Field(default=False, description="True if word_count >= 10 and confidence >= 0.5")
 
 
-# ── Module 7: Autonomous Mission Control ──────────────────────────────────────
+# ── Persona Models ────────────────────────────────────────────────────────────
 
-class ApplicationStatus(BaseModel):
+class PersonaProfile(BaseModel):
+    """
+    Calibrated psychometric interviewer archetype.
+    """
     id: str
-    company: str
-    status: str  # applied | assessment | interview | offer | rejected
-    last_updated: str
-    email_id: Optional[str] = None
+    name: str
+    title: str
+    difficulty: str
+    accent_color: str
+    voice_model: str
+    pause_tolerance: float = Field(..., description="Seconds of candidate silence before agent nudges")
+    thinking_delay: float = Field(..., description="Seconds the agent pauses before responding to simulate thought")
+    max_words: int = Field(default=35, description="Strict cap on spoken words per turn to guarantee token economy")
+    system_prompt: str
+    signature_phrase: str
 
-class PerformanceMetric(BaseModel):
-    date: str
-    interview_score: Optional[int] = None
-    study_hours: Optional[float] = None
 
-class MissionControlSummary(BaseModel):
-    user_id: str
-    applications: list[ApplicationStatus] = Field(default_factory=list)
-    performance_history: list[PerformanceMetric] = Field(default_factory=list)
-    urgency_level: str = "low"  # low | high
-    action_cta: str = ""
+# ── Evaluation & Anti-Phantom Dossier Models ───────────────────────────────────
+
+class AssertionResult(BaseModel):
+    assertion_name: str
+    passed: bool
+    evidence_quote: Optional[str] = Field(None, description="Exact verbatim citation from candidate speech")
+    critique: str
+
+
+class QuestionEvaluation(BaseModel):
+    question_id: str
+    question_text: str
+    status: str = Field(default="VERIFIED", description="'VERIFIED' | 'UNREACHED'")
+    score: float = Field(default=0.0, ge=0.0, le=100.0)
+    weight: float = Field(default=1.0, ge=0.0, le=1.0)
+    assertion_results: List[AssertionResult] = Field(default_factory=list)
+    verbatim_citations: List[str] = Field(default_factory=list)
+
+
+class CompetencyScore(BaseModel):
+    dsa_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    system_design_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    communication_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    tradeoff_intuition_score: float = Field(default=0.0, ge=0.0, le=100.0)
+
+
+class EvaluationReport(BaseModel):
+    """
+    Staff Hiring Committee Executive Dossier.
+    Guaranteed mathematically against phantom questions through the SQLite Ledger.
+    """
+    session_id: str
+    overall_score: float = Field(..., ge=0.0, le=100.0)
+    recommendation: HiringRecommendation
+    competencies: CompetencyScore
+    question_evaluations: List[QuestionEvaluation] = Field(default_factory=list)
+    session_hash: str = Field(..., description="SHA-256 session integrity digest over all ledger turns")
+    unreached_question_count: int = Field(default=0)
+    verified_turn_count: int = Field(default=0)
+    created_at: str
