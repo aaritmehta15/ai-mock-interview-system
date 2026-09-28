@@ -95,12 +95,27 @@ async def entrypoint(ctx: JobContext):
         logger.info("[agent] No pre-registered blueprint found for session %s; using calibrated fallback", session_id)
         bp = build_fallback_blueprint("Technology Firm", "Software Engineer")
 
-    # Determine persona from room metadata (defaulting safely to Alex)
+    # Determine persona from participant metadata.
+    # The token endpoint stores persona_id in the participant JWT (.with_metadata()),
+    # NOT in room metadata — so we must read it from the participant, not ctx.room.metadata.
     persona_id = "alex"
     try:
+        # First try room metadata (may be set in some deployments)
         if ctx.room.metadata:
             meta = json.loads(ctx.room.metadata)
             persona_id = meta.get("persona_id", "alex")
+        # Then check all current participants' metadata (the real source)
+        for p in ctx.room.remote_participants.values():
+            if p.metadata:
+                try:
+                    pmeta = json.loads(p.metadata)
+                    pid = pmeta.get("persona_id", "")
+                    if pid:
+                        persona_id = pid
+                        break
+                except Exception:
+                    pass
+        logger.info("[agent] Resolved persona_id='%s' from participant metadata", persona_id)
     except Exception as e:
         logger.warning("[agent] Metadata parse failed: %s; using default persona", e)
 
