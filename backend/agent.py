@@ -118,11 +118,13 @@ def _normalize_speech_to_english(text: str) -> str:
 def build_system_instructions(
     bp: Optional[InterviewBlueprint] = None,
     persona: Optional[PersonaProfile] = None,
+    calibrated_role: Optional[str] = None,
+    seniority_name: Optional[str] = None,
 ) -> str:
     """Build grounded, persona-calibrated system prompt from active Blueprint."""
     active_persona = persona or ALEX_EMPATHETIC_LEAD
-    active_bp = bp or build_fallback_blueprint("Technology Firm", "Software Engineer")
-    return compile_persona_instructions(active_persona, active_bp)
+    active_bp = bp or build_fallback_blueprint("Technology Firm", "Software Engineer", "Staff")
+    return compile_persona_instructions(active_persona, active_bp, calibrated_role, seniority_name)
 
 
 async def entrypoint(ctx: JobContext):
@@ -137,10 +139,11 @@ async def entrypoint(ctx: JobContext):
         await ctx.wait_for_participant()
         logger.info("[agent] Candidate joined room %s", session_id)
 
-    # Determine persona, company, and role from participant and room metadata
+    # Determine persona, company, role, and seniority from participant and room metadata
     persona_id = "alex"
     company_from_meta = ""
     role_from_meta = ""
+    seniority_from_meta = ""
     try:
         # Check room metadata
         if ctx.room.metadata:
@@ -148,6 +151,7 @@ async def entrypoint(ctx: JobContext):
             persona_id = meta.get("persona_id", persona_id)
             company_from_meta = meta.get("company", "")
             role_from_meta = meta.get("role", "")
+            seniority_from_meta = meta.get("seniority", "")
         # Check participant metadata (the primary source from JWT token)
         for p in ctx.room.remote_participants.values():
             if p.metadata:
@@ -160,12 +164,14 @@ async def entrypoint(ctx: JobContext):
                         company_from_meta = pmeta.get("company")
                     if pmeta.get("role"):
                         role_from_meta = pmeta.get("role")
+                    if pmeta.get("seniority"):
+                        seniority_from_meta = pmeta.get("seniority")
                     if pid:
                         break
                 except Exception:
                     pass
-        logger.info("[agent] Resolved metadata: persona='%s', company='%s', role='%s'",
-                    persona_id, company_from_meta, role_from_meta)
+        logger.info("[agent] Resolved metadata: persona='%s', company='%s', role='%s', seniority='%s'",
+                    persona_id, company_from_meta, role_from_meta, seniority_from_meta)
     except Exception as e:
         logger.warning("[agent] Metadata parse failed: %s; using defaults", e)
 
@@ -174,16 +180,31 @@ async def entrypoint(ctx: JobContext):
         logger.info("[agent] No pre-registered blueprint for session %s; using calibrated fallback", session_id)
         bp = build_fallback_blueprint(
             company_from_meta or "Technology Firm",
-            role_from_meta or "Software Engineer"
+            role_from_meta or "Software Engineer",
+            seniority_from_meta or "Staff",
         )
 
     persona = get_persona(persona_id)
     company_name = bp.company or company_from_meta or "our engineering team"
-    role_name = bp.role or role_from_meta or "Software Engineer"
+    base_role_name = bp.role or role_from_meta or "Software Engineer"
+    seniority_name = (
+        seniority_from_meta
+        or (bp.seniority.value if hasattr(bp.seniority, "value") else str(bp.seniority))
+        or "Staff"
+    )
+
+    # Calibrate role title with seniority (e.g. "Staff AI Infrastructure Engineer", "Senior Backend Engineer")
+    clean_level = seniority_name.split("/")[0].strip() if "/" in seniority_name else seniority_name.strip()
+    if re.search(rf"\b{re.escape(clean_level)}\b", base_role_name, re.IGNORECASE):
+        calibrated_role_title = base_role_name
+    elif clean_level.lower() in ["mid-level", "mid"]:
+        calibrated_role_title = base_role_name
+    else:
+        calibrated_role_title = f"{clean_level} {base_role_name}"
 
     logger.info(
-        "[agent] Active persona: %s (%s) | Company: %s | Role: %s | Voice: %s | Max Words: %d",
-        persona.name, persona.title, company_name, role_name, persona.voice_model, persona.max_words,
+        "[agent] Active persona: %s (%s) | Company: %s | Role: %s | Level: %s | Voice: %s | Max Words: %d",
+        persona.name, persona.title, company_name, calibrated_role_title, seniority_name, persona.voice_model, persona.max_words,
     )
 
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -195,11 +216,11 @@ async def entrypoint(ctx: JobContext):
     # ─────────────────────────────────────────────────────────────────────────
     greeting_text = (
         f"Hi there! I'm {persona.name}, {persona.title} at {company_name}. "
-        f"Welcome to your technical interview for the {role_name} position. "
+        f"Welcome to your technical interview for the {calibrated_role_title} position. "
         "To get started, could you briefly introduce yourself and share a bit about your background?"
     )
 
-    instructions = build_system_instructions(bp, persona)
+    instructions = build_system_instructions(bp, persona, calibrated_role_title, seniority_name)
     instructions_with_greeting = (
         instructions
         + f"\n\n---\nSESSION START: When the session begins, your VERY FIRST spoken output must be exactly:\n\"{greeting_text}\"\nThen wait for the candidate to introduce themselves."

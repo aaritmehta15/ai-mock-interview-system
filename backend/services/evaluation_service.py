@@ -179,9 +179,10 @@ async def evaluate_session(session_id: str) -> EvaluationReport:
     all_candidate_turns = [t for t in turns if t.speaker == TurnSpeaker.CANDIDATE]
     all_candidate_text = " ".join(t.text for t in all_candidate_turns)
     
-    # If we have per-question index data use it, otherwise treat all as reached
-    has_indexed_turns = any(t.question_index > 0 for t in turns)
-    asked_indices = ledger_service.get_asked_question_indices(session_id) if has_indexed_turns else None
+    # If we have per-question index data from interviewer turns, use it; otherwise treat all as reached
+    interviewer_indices = ledger_service.get_asked_question_indices(session_id)
+    has_indexed_turns = len(interviewer_indices) > 0
+    asked_indices = interviewer_indices if has_indexed_turns else None
     
     question_evaluations: List[QuestionEvaluation] = []
     total_weighted_score = 0.0

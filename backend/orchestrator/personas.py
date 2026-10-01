@@ -102,14 +102,34 @@ def list_personas() -> List[PersonaProfile]:
 
 
 def compile_persona_instructions(
-    persona: PersonaProfile, blueprint: InterviewBlueprint
+    persona: PersonaProfile,
+    blueprint: InterviewBlueprint,
+    calibrated_role: Optional[str] = None,
+    seniority_name: Optional[str] = None,
 ) -> str:
     """
     Compiles the comprehensive system prompt for the LiveKit voice agent,
     synthesizing the persona's psychological tone with the target job blueprint.
     """
+    import re
     company_name = blueprint.company or "our engineering team"
-    role_name = blueprint.role or "Software Engineer"
+    base_role = blueprint.role or "Software Engineer"
+    seniority_val = (
+        seniority_name
+        or (blueprint.seniority.value if hasattr(blueprint.seniority, "value") else str(blueprint.seniority))
+        or "Staff"
+    )
+    clean_level = seniority_val.split("/")[0].strip() if "/" in seniority_val else seniority_val.strip()
+
+    if calibrated_role:
+        full_role = calibrated_role
+    elif re.search(rf"\b{re.escape(clean_level)}\b", base_role, re.IGNORECASE):
+        full_role = base_role
+    elif clean_level.lower() in ["mid-level", "mid"]:
+        full_role = base_role
+    else:
+        full_role = f"{clean_level} {base_role}"
+
     questions_formatted = "\n".join(
         f"{i+1}. [{q.competency.upper()}] {q.text}"
         for i, q in enumerate(blueprint.questions)
@@ -121,8 +141,9 @@ You are an expert AI Technical Interviewer acting as {persona.name}, {persona.ti
 
 {persona.system_prompt}
 
-TARGET ROLE: {role_name} ({blueprint.seniority.value.upper()} level)
+TARGET ROLE: {full_role}
 TARGET COMPANY: {company_name}
+JOB LEVEL / SENIORITY: {seniority_val}
 
 KEY TECHNICAL DOMAINS & VOCABULARY:
 {keywords_formatted}
@@ -132,8 +153,8 @@ INTERVIEW BLUEPRINT QUESTIONS (Deliver sequentially; do not skip or combine):
 
 ABSOLUTE CONVERSATIONAL RULES:
 0. LANGUAGE: You MUST speak and interact ONLY in English at ALL times. Never speak, write, or translate into Hindi, Hinglish, or any other language, regardless of the candidate's accent or language. This is a strict, non-negotiable rule for an English-only interview.
-1. STAGE 1 - GREETING & CANDIDATE INTRODUCTION:
-   - Your very first spoken utterance must introduce yourself as {persona.name}, {persona.title} at {company_name}, welcome the candidate to their interview for the {role_name} position, and ask them for a brief introduction about themselves and their background.
+1. STAGE 1 - GREET FIRST & CANDIDATE INTRODUCTION:
+   - Your very first spoken utterance must introduce yourself as {persona.name}, {persona.title} at {company_name}, welcome the candidate to their technical interview for the {full_role} position, and ask them for a brief introduction about themselves and their background.
    - When the candidate finishes their introduction, acknowledge it in ONE concise sentence matching your persona (e.g. "Thanks for the introduction—great to have you here today. Let's move directly into our first problem."), and then immediately ask Question 1 from the blueprint.
 2. STAGE 2 - TECHNICAL BLUEPRINT QUESTIONS:
    - Deliver the blueprint questions sequentially, ONE AT A TIME.

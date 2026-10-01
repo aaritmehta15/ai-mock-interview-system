@@ -104,6 +104,7 @@ class TokenRequest(BaseModel):
     persona_id: Optional[str] = Field("alex", description="Selected persona: alex | marcus | priya")
     company: Optional[str] = Field(None, description="Target company")
     role: Optional[str] = Field(None, description="Target role")
+    seniority: Optional[str] = Field(None, description="Target seniority / job level: Junior | Mid-Level | Senior | Staff | Principal")
 
 
 class TokenResponse(BaseModel):
@@ -271,16 +272,28 @@ async def generate_token_endpoint(req: TokenRequest):
         )
 
     identity = req.identity or f"cand_{req.participant_name.lower().replace(' ', '_')}_{os.urandom(3).hex()}"
+    active_bp = get_blueprint(req.room_name)
+    resolved_company = req.company or (active_bp.company if active_bp else "") or "Google"
+    resolved_role = req.role or (active_bp.role if active_bp else "") or "Staff Distributed Systems Engineer"
+    resolved_seniority = (
+        req.seniority
+        or (active_bp.seniority.value if active_bp and hasattr(active_bp.seniority, "value") else str(active_bp.seniority) if active_bp else "")
+        or "Staff"
+    )
+
     metadata_json = json.dumps({
         "persona_id": req.persona_id or "alex",
-        "company": req.company or "",
-        "role": req.role or "",
+        "company": resolved_company,
+        "role": resolved_role,
+        "seniority": resolved_seniority,
     })
 
     # Link active blueprint to this specific room so agent worker immediately has questions
-    active_bp = get_blueprint(req.room_name)
     if active_bp:
         save_blueprint(req.room_name, active_bp)
+    else:
+        fallback_bp = build_fallback_blueprint(resolved_company, resolved_role, resolved_seniority)
+        save_blueprint(req.room_name, fallback_bp)
 
     token = (
         livekit_api.AccessToken(api_key, api_secret)

@@ -7,6 +7,10 @@ import {
   Activity,
   AlertTriangle,
   Loader2,
+  Building2,
+  Briefcase,
+  Award,
+  Edit3,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useInterview } from '../context/InterviewContext';
@@ -44,6 +48,9 @@ export default function Interview() {
     selectedPersona,
     setLatestReport,
     startFreshSession,
+    setTargetCompany,
+    setTargetRole,
+    setSeniority,
   } = useInterview();
 
   const navigate = useNavigate();
@@ -53,6 +60,7 @@ export default function Interview() {
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [isEditingTarget, setIsEditingTarget] = useState<boolean>(false);
   const activeSessionIdRef = useRef<string>(sessionId);
 
   const persona: PersonaProfile = selectedPersona || {
@@ -69,9 +77,14 @@ export default function Interview() {
     activeSessionIdRef.current = activeSessionId;
 
     try {
-      // 1. Ensure blueprint exists
+      // 1. Ensure blueprint exists and matches chosen target parameters
       let currentBp = blueprint;
-      if (!currentBp) {
+      if (
+        !currentBp ||
+        (targetCompany && currentBp.company !== targetCompany) ||
+        (targetRole && currentBp.role !== targetRole) ||
+        (seniority && currentBp.seniority !== seniority)
+      ) {
         currentBp = await createBlueprint({
           company: targetCompany || 'Google',
           role: targetRole || 'Staff Distributed Systems Engineer',
@@ -84,13 +97,18 @@ export default function Interview() {
 
       // 2. Obtain WebRTC Access Token for activeSessionId
       const participantName = user?.displayName || 'Staff Candidate';
+      const resolvedCompany = targetCompany || (currentBp?.company ?? 'Google');
+      const resolvedRole = targetRole || (currentBp?.role ?? 'Staff Distributed Systems Engineer');
+      const resolvedSeniority = seniority || (currentBp?.seniority ?? 'Staff');
+
       const tokenRes = await getLiveKitToken({
         room_name: activeSessionId,
         participant_name: participantName,
         identity: `cand_${activeSessionId.slice(-6)}`,
         persona_id: persona.id,
-        company: targetCompany || (currentBp?.company ?? 'Google'),
-        role: targetRole || (currentBp?.role ?? 'Staff Distributed Systems Engineer'),
+        company: resolvedCompany,
+        role: resolvedRole,
+        seniority: resolvedSeniority,
       });
 
       setLiveKitToken(tokenRes.token);
@@ -171,7 +189,7 @@ export default function Interview() {
                 marginBottom: 4,
               }}
             >
-              {targetCompany} · {targetRole}
+              {targetCompany} · {seniority} {targetRole.replace(new RegExp(`^${seniority}\\s*`, 'i'), '')}
             </h1>
             <p style={{ color: '#94a3b8', fontSize: 13 }}>
               Sparring with <strong style={{ color: persona.accent_color }}>{persona.name}</strong> ({persona.title})
@@ -257,9 +275,107 @@ export default function Interview() {
           <h2 style={{ fontSize: 24, fontWeight: 700, color: '#f8fafc', marginBottom: 8 }}>
             Ready to Enter the Technical Voice Chamber
           </h2>
-          <p style={{ color: '#94a3b8', fontSize: 14, maxWidth: 540, margin: '0 auto 24px', lineHeight: 1.6 }}>
+          <p style={{ color: '#94a3b8', fontSize: 14, maxWidth: 540, margin: '0 auto 20px', lineHeight: 1.6 }}>
             {persona.name} will greet you autonomously when your microphone connects. Speak naturally. All turns are preserved in the append-only ledger.
           </p>
+
+          {/* Interactive Target Calibration Card */}
+          <div
+            style={{
+              maxWidth: 580,
+              margin: '0 auto 28px',
+              padding: '16px 20px',
+              borderRadius: 12,
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: '#818cf8', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Building2 size={13} />
+                CALIBRATED TARGET PROFILE
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsEditingTarget(!isEditingTarget)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: 6,
+                  padding: '4px 10px',
+                  color: '#c7d2fe',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                }}
+              >
+                <Edit3 size={12} />
+                <span>{isEditingTarget ? 'Done' : 'Change Target'}</span>
+              </button>
+            </div>
+
+            {isEditingTarget ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                    <Building2 size={12} /> Company
+                  </label>
+                  <input
+                    type="text"
+                    value={targetCompany}
+                    onChange={(e) => setTargetCompany(e.target.value)}
+                    placeholder="e.g. Apple"
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 6, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', outline: 'none' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                    <Award size={12} /> Seniority Level
+                  </label>
+                  <select
+                    value={seniority}
+                    onChange={(e) => setSeniority(e.target.value)}
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 6, background: '#0e121c', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', outline: 'none', cursor: 'pointer' }}
+                  >
+                    <option value="Junior">Junior</option>
+                    <option value="Mid-Level">Mid-Level</option>
+                    <option value="Senior">Senior</option>
+                    <option value="Staff">Staff</option>
+                    <option value="Principal">Principal</option>
+                  </select>
+                </div>
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                    <Briefcase size={12} /> Target Role
+                  </label>
+                  <input
+                    type="text"
+                    value={targetRole}
+                    onChange={(e) => setTargetRole(e.target.value)}
+                    placeholder="e.g. AI Infrastructure Engineer"
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 6, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', outline: 'none' }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#f8fafc' }}>
+                    {targetCompany} · {seniority} {targetRole.replace(new RegExp(`^${seniority}\\s*`, 'i'), '')}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                    Interviewer will greet and evaluate you specifically for this role and seniority tier
+                  </div>
+                </div>
+                <span className="status-pill status-pill-emerald" style={{ fontSize: 11 }}>
+                  CALIBRATED
+                </span>
+              </div>
+            )}
+          </div>
 
           {connectionError && (
             <div

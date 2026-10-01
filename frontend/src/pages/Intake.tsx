@@ -10,6 +10,9 @@ import {
   AlertCircle,
   FileCheck,
   Loader2,
+  Building2,
+  Briefcase,
+  Award,
 } from 'lucide-react';
 import { useInterview } from '../context/InterviewContext';
 import { createBlueprint, uploadResumePdf, type InterviewBlueprint } from '../lib/api';
@@ -32,6 +35,9 @@ export default function Intake() {
     seniority,
     blueprint,
     setBlueprint,
+    setTargetCompany,
+    setTargetRole,
+    setSeniority,
   } = useInterview();
 
   const navigate = useNavigate();
@@ -138,6 +144,96 @@ export default function Intake() {
           Upload your resume PDF or use our pre-calibrated Staff Engineering profile. Apex extracts your technical depth and generates real interview questions with mathematical binary assertions.
         </p>
       </motion.div>
+
+      {/* Target Position Calibration */}
+      <div
+        className="studio-card"
+        style={{
+          padding: '20px 24px',
+          background: 'rgba(14, 18, 28, 0.85)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          marginBottom: 24,
+        }}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+          {/* Target Company */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#818cf8', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Building2 size={13} />
+              TARGET COMPANY
+            </label>
+            <input
+              type="text"
+              value={targetCompany}
+              onChange={(e) => setTargetCompany(e.target.value)}
+              placeholder="e.g. Apple, Google, Meta, Netflix..."
+              style={{
+                fontSize: 13,
+                padding: '9px 12px',
+                width: '100%',
+                borderRadius: 8,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: '#f8fafc',
+                outline: 'none',
+              }}
+            />
+          </div>
+
+          {/* Job Level / Seniority */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#10b981', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Award size={13} />
+              JOB LEVEL / SENIORITY
+            </label>
+            <select
+              value={seniority}
+              onChange={(e) => setSeniority(e.target.value)}
+              style={{
+                fontSize: 13,
+                padding: '9px 12px',
+                width: '100%',
+                borderRadius: 8,
+                background: '#0e121c',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: '#f8fafc',
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="Junior">Junior (L3 / SDE I)</option>
+              <option value="Mid-Level">Mid-Level (L4 / SDE II)</option>
+              <option value="Senior">Senior (L5 / Senior SDE)</option>
+              <option value="Staff">Staff (L6 / Staff Engineer)</option>
+              <option value="Principal">Principal (L7+ / Director)</option>
+            </select>
+          </div>
+
+          {/* Target Role */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Briefcase size={13} />
+              TARGET ROLE
+            </label>
+            <input
+              type="text"
+              value={targetRole}
+              onChange={(e) => setTargetRole(e.target.value)}
+              placeholder="e.g. Distributed Systems Engineer"
+              style={{
+                fontSize: 13,
+                padding: '9px 12px',
+                width: '100%',
+                borderRadius: 8,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: '#f8fafc',
+                outline: 'none',
+              }}
+            />
+          </div>
+        </div>
+      </div>
 
       {/* Main Grid: Upload & Controls on Left, Blueprint Preview on Right */}
       <div style={{ display: 'grid', gridTemplateColumns: blueprint ? '1fr 1.2fr' : '1fr', gap: 24, marginBottom: 36 }}>

@@ -264,17 +264,34 @@ Return ONLY valid JSON matching this schema:
 def build_fallback_blueprint(
     company: str,
     role: str,
-    seniority: SeniorityLevel = SeniorityLevel.MID
+    seniority: SeniorityLevel | str = SeniorityLevel.STAFF
 ) -> InterviewBlueprint:
     """
     Deterministic fallback blueprint guaranteeing uninterrupted interview availability
     even when external AI APIs encounter network timeouts or rate limits.
     """
+    seniority_map = {
+        "junior": SeniorityLevel.JUNIOR,
+        "mid-level": SeniorityLevel.MID,
+        "mid": SeniorityLevel.MID,
+        "senior": SeniorityLevel.SENIOR,
+        "staff/principal": SeniorityLevel.STAFF,
+        "staff": SeniorityLevel.STAFF,
+        "principal": SeniorityLevel.STAFF,
+    }
+    if isinstance(seniority, str):
+        seniority_enum = seniority_map.get(seniority.strip().lower(), SeniorityLevel.STAFF)
+    else:
+        seniority_enum = seniority
+
+    clean_company = company.strip() or "Technology Firm"
+    clean_role = role.strip() or "Software Engineer"
+
     return InterviewBlueprint(
-        blueprint_id=f"bp_canonical_{re.sub(r'[^a-zA-Z0-9]', '_', company.lower())}_{re.sub(r'[^a-zA-Z0-9]', '_', role.lower())}",
-        company=company,
-        role=role,
-        seniority=seniority,
+        blueprint_id=f"bp_canonical_{re.sub(r'[^a-zA-Z0-9]', '_', clean_company.lower())}_{re.sub(r'[^a-zA-Z0-9]', '_', clean_role.lower())}",
+        company=clean_company,
+        role=clean_role,
+        seniority=seniority_enum,
         keywords=["Data Structures", "Distributed Systems", "Idempotency", "Concurrency", "Kafka", "Redis", "PostgreSQL"],
         rounds=["Technical Problem Solving", "Distributed Systems", "Operational Reliability"],
         questions=[

@@ -64,6 +64,18 @@ export function InterviewProvider({ children }: { children: ReactNode }) {
     setBlueprintState(bp);
     if (bp) {
       sessionStorage.setItem(`${STORAGE_KEY}_blueprint`, JSON.stringify(bp));
+      if (bp.company) {
+        setTargetCompany(bp.company);
+        sessionStorage.setItem(`${STORAGE_KEY}_company`, bp.company);
+      }
+      if (bp.role) {
+        setTargetRole(bp.role);
+        sessionStorage.setItem(`${STORAGE_KEY}_role`, bp.role);
+      }
+      if (bp.seniority) {
+        setSeniority(bp.seniority);
+        sessionStorage.setItem(`${STORAGE_KEY}_seniority`, bp.seniority);
+      }
     } else {
       sessionStorage.removeItem(`${STORAGE_KEY}_blueprint`);
     }
