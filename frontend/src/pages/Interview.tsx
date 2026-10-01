@@ -43,6 +43,7 @@ export default function Interview() {
     selectedPersonaId,
     selectedPersona,
     setLatestReport,
+    startFreshSession,
   } = useInterview();
 
   const navigate = useNavigate();
@@ -62,6 +63,9 @@ export default function Interview() {
     setIsConnecting(true);
     setConnectionError(null);
 
+    // ALWAYS generate a fresh session ID for each interview attempt so old turns and marks never leak
+    const activeSessionId = startFreshSession();
+
     try {
       // 1. Ensure blueprint exists
       let currentBp = blueprint;
@@ -70,18 +74,18 @@ export default function Interview() {
           company: targetCompany || 'Google',
           role: targetRole || 'Staff Distributed Systems Engineer',
           seniority: seniority || 'Staff',
-          session_id: sessionId,
+          session_id: activeSessionId,
           persona_id: persona.id,
         });
         setBlueprint(currentBp);
       }
 
-      // 2. Obtain WebRTC Access Token
+      // 2. Obtain WebRTC Access Token for activeSessionId
       const participantName = user?.displayName || 'Staff Candidate';
       const tokenRes = await getLiveKitToken({
-        room_name: sessionId,
+        room_name: activeSessionId,
         participant_name: participantName,
-        identity: `cand_${sessionId.slice(-6)}`,
+        identity: `cand_${activeSessionId.slice(-6)}`,
         persona_id: persona.id,
         company: targetCompany || (currentBp?.company ?? 'Google'),
         role: targetRole || (currentBp?.role ?? 'Staff Distributed Systems Engineer'),

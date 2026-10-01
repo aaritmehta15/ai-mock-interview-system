@@ -277,6 +277,11 @@ async def generate_token_endpoint(req: TokenRequest):
         "role": req.role or "",
     })
 
+    # Link active blueprint to this specific room so agent worker immediately has questions
+    active_bp = get_blueprint(req.room_name)
+    if active_bp:
+        save_blueprint(req.room_name, active_bp)
+
     token = (
         livekit_api.AccessToken(api_key, api_secret)
         .with_identity(identity)

@@ -35,9 +35,12 @@ export default function Evaluation() {
   const navigate = useNavigate();
   const activeSessionId = paramSessionId || contextSessionId;
 
-  const [report, setReport] = useState<EvaluationReport | null>(latestReport);
+  // Strict session check: ONLY use latestReport if it actually belongs to activeSessionId
+  const hasMatchingCache = !!(latestReport && latestReport.session_id === activeSessionId);
+
+  const [report, setReport] = useState<EvaluationReport | null>(hasMatchingCache ? latestReport : null);
   const [ledger, setLedger] = useState<LedgerAuditResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(!latestReport);
+  const [isLoading, setIsLoading] = useState<boolean>(!hasMatchingCache);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [expandedQuestions, setExpandedQuestions] = useState<Record<string, boolean>>({});
   const [showLedgerDrawer, setShowLedgerDrawer] = useState<boolean>(false);
@@ -51,8 +54,9 @@ export default function Evaluation() {
       setErrorMsg(null);
 
       try {
+        const isCacheValid = latestReport && latestReport.session_id === activeSessionId;
         const [evalReport, ledgerData] = await Promise.all([
-          latestReport ? Promise.resolve(latestReport) : evaluateSession(activeSessionId),
+          isCacheValid ? Promise.resolve(latestReport) : evaluateSession(activeSessionId),
           getLedger(activeSessionId).catch(() => null),
         ]);
 
@@ -62,8 +66,8 @@ export default function Evaluation() {
           if (ledgerData) setLedger(ledgerData);
 
           // default first question expanded
-          if (evalReport?.questions_evaluated?.length) {
-            setExpandedQuestions({ [evalReport.questions_evaluated[0].question_id]: true });
+          if (evalReport?.question_evaluations?.length) {
+            setExpandedQuestions({ [evalReport.question_evaluations[0].question_id]: true });
           }
         }
       } catch (err: any) {

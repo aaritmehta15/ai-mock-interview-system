@@ -256,7 +256,11 @@ async def evaluate_session(session_id: str) -> EvaluationReport:
             tradeoff_scores.append(q_score)
             
         # Communication metric based on clarity and brevity
-        comm_score = min(100.0, max(40.0, 100.0 - abs(len(combined_candidate_text.split()) - 100) * 0.3))
+        word_count = len(combined_candidate_text.split())
+        if word_count == 0:
+            comm_score = 0.0
+        else:
+            comm_score = min(100.0, max(20.0, 100.0 - abs(word_count - 100) * 0.3))
         communication_scores.append(comm_score)
 
     # Compute overall calibrated score
@@ -265,7 +269,7 @@ async def evaluate_session(session_id: str) -> EvaluationReport:
     # Competency breakdown
     avg_dsa = round(sum(dsa_scores) / len(dsa_scores), 1) if dsa_scores else overall_score
     avg_sd = round(sum(system_design_scores) / len(system_design_scores), 1) if system_design_scores else overall_score
-    avg_comm = round(sum(communication_scores) / len(communication_scores), 1) if communication_scores else 75.0
+    avg_comm = round(sum(communication_scores) / len(communication_scores), 1) if communication_scores else 0.0
     avg_tradeoff = round(sum(tradeoff_scores) / len(tradeoff_scores), 1) if tradeoff_scores else overall_score
 
     competencies = CompetencyScore(

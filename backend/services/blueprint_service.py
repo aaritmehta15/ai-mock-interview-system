@@ -88,12 +88,13 @@ def save_blueprint(session_id: str, blueprint: InterviewBlueprint) -> None:
 
 
 def get_blueprint(session_id: str) -> Optional[InterviewBlueprint]:
-    """Retrieve blueprint from in-memory cache; fall back to SQLite persistence if missing."""
+    """Retrieve blueprint from in-memory cache; fall back to SQLite persistence or most recent blueprint."""
     if session_id in _blueprint_store:
         return _blueprint_store[session_id]
     # Check SQLite persistence (survives backend restarts)
     conn = _get_db()
     try:
+        # 1. Direct match for session_id
         row = conn.execute(
             "SELECT blueprint_json FROM blueprints WHERE key = ?",
             (session_id,)
@@ -103,6 +104,17 @@ def get_blueprint(session_id: str) -> Optional[InterviewBlueprint]:
             _blueprint_store[session_id] = bp  # warm the cache
             logger.info("[blueprint] Restored blueprint from SQLite for session %s (%d questions)",
                         session_id, len(bp.questions))
+            return bp
+
+        # 2. Re-associate the most recently generated blueprint from SQLite
+        row = conn.execute(
+            "SELECT blueprint_json FROM blueprints ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            bp = InterviewBlueprint.model_validate_json(row["blueprint_json"])
+            _blueprint_store[session_id] = bp  # link to this new session
+            logger.info("[blueprint] Linked active recent blueprint %s to new session %s (%d questions)",
+                        bp.blueprint_id, session_id, len(bp.questions))
             return bp
     except Exception as e:
         logger.warning("[blueprint] SQLite restore failed for session %s: %s", session_id, e)

@@ -18,6 +18,7 @@ interface InterviewContextType {
   setSelectedPersona: (p: PersonaProfile | null) => void;
   setLatestReport: (r: EvaluationReport | null) => void;
   initSession: () => string;
+  startFreshSession: () => string;
   resetSession: () => void;
 }
 
@@ -83,10 +84,15 @@ export function InterviewProvider({ children }: { children: ReactNode }) {
     return newId;
   };
 
-  const resetSession = () => {
+  const startFreshSession = () => {
     const newId = initSession();
-    setBlueprint(null);
     setLatestReport(null);
+    return newId;
+  };
+
+  const resetSession = () => {
+    const newId = startFreshSession();
+    setBlueprint(null);
     return newId;
   };
 
@@ -109,6 +115,7 @@ export function InterviewProvider({ children }: { children: ReactNode }) {
         setSelectedPersona,
         setLatestReport,
         initSession,
+        startFreshSession,
         resetSession,
       }}
     >
