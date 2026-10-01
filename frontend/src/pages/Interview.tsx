@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -53,6 +53,7 @@ export default function Interview() {
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const activeSessionIdRef = useRef<string>(sessionId);
 
   const persona: PersonaProfile = selectedPersona || {
     ...DEFAULT_PERSONA,
@@ -65,6 +66,7 @@ export default function Interview() {
 
     // ALWAYS generate a fresh session ID for each interview attempt so old turns and marks never leak
     const activeSessionId = startFreshSession();
+    activeSessionIdRef.current = activeSessionId;
 
     try {
       // 1. Ensure blueprint exists
@@ -107,14 +109,15 @@ export default function Interview() {
   const handleEndInterview = async () => {
     setLiveKitToken(null);
     setIsEvaluating(true);
+    const targetSessionId = activeSessionIdRef.current || sessionId;
 
     try {
-      const report = await evaluateSession(sessionId);
+      const report = await evaluateSession(targetSessionId);
       setLatestReport(report);
-      navigate(`/evaluation/${sessionId}`);
+      navigate(`/evaluation/${targetSessionId}`);
     } catch (err: any) {
       console.error('[interview] Evaluation generation failed:', err);
-      navigate(`/evaluation/${sessionId}`);
+      navigate(`/evaluation/${targetSessionId}`);
     } finally {
       setIsEvaluating(false);
     }
