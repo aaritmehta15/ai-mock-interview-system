@@ -190,6 +190,8 @@ export const getLiveKitToken = (payload: {
   participant_name: string;
   identity?: string;
   persona_id?: string;
+  company?: string;
+  role?: string;
 }): Promise<{ token: string; server_url: string; room_name: string; participant_name: string }> =>
   api.post('/api/token', payload).then(r => r.data);
 

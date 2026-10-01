@@ -83,6 +83,8 @@ export default function Interview() {
         participant_name: participantName,
         identity: `cand_${sessionId.slice(-6)}`,
         persona_id: persona.id,
+        company: targetCompany || (currentBp?.company ?? 'Google'),
+        role: targetRole || (currentBp?.role ?? 'Staff Distributed Systems Engineer'),
       });
 
       setLiveKitToken(tokenRes.token);

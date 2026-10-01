@@ -102,6 +102,8 @@ class TokenRequest(BaseModel):
     participant_name: str = Field(..., description="Candidate display name")
     identity: Optional[str] = Field(None, description="Unique candidate identity")
     persona_id: Optional[str] = Field("alex", description="Selected persona: alex | marcus | priya")
+    company: Optional[str] = Field(None, description="Target company")
+    role: Optional[str] = Field(None, description="Target role")
 
 
 class TokenResponse(BaseModel):
@@ -269,7 +271,11 @@ async def generate_token_endpoint(req: TokenRequest):
         )
 
     identity = req.identity or f"cand_{req.participant_name.lower().replace(' ', '_')}_{os.urandom(3).hex()}"
-    metadata_json = json.dumps({"persona_id": req.persona_id or "alex"})
+    metadata_json = json.dumps({
+        "persona_id": req.persona_id or "alex",
+        "company": req.company or "",
+        "role": req.role or "",
+    })
 
     token = (
         livekit_api.AccessToken(api_key, api_secret)

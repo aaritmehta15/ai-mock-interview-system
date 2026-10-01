@@ -37,9 +37,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from typing import Optional
 from dotenv import load_dotenv
+import groq
+from google.genai import types as genai_types
 
 # Ensure repository root is on sys.path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -75,6 +78,43 @@ from backend.orchestrator.personas import (
 )
 
 
+_groq_client = groq.Client(api_key=os.getenv("GROQ_API_KEY")) if os.getenv("GROQ_API_KEY") else None
+
+
+def _contains_devanagari(text: str) -> bool:
+    """Returns True if text contains characters in the Devanagari Unicode block (Hindi script)."""
+    return bool(re.search(r'[\u0900-\u097f]', text))
+
+
+def _normalize_speech_to_english(text: str) -> str:
+    """
+    Guarantees English output: If automated speech recognition phonetically transcribed
+    accented English into Devanagari Hindi script, cleans it back into exact English words.
+    """
+    if not _contains_devanagari(text) or not _groq_client:
+        return text
+    try:
+        prompt = (
+            f'The candidate spoke English in an interview, but automated speech-to-text phonetically '
+            f'transcribed it into Devanagari Hindi script:\n"{text}"\n'
+            f'Convert this back into clean, exact English words representing what the candidate spoke. '
+            f'Output ONLY the English transcription without any additional explanation, notes, or quotes.'
+        )
+        res = _groq_client.chat.completions.create(
+            model=os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=200,
+        )
+        clean = res.choices[0].message.content.strip().strip('"')
+        if clean and not _contains_devanagari(clean):
+            logger.info("[stt-sanitizer] Cleaned Devanagari ASR to English: '%s' -> '%s'", text[:50], clean[:50])
+            return clean
+    except Exception as e:
+        logger.warning("[stt-sanitizer] Normalization error: %s", e)
+    return text
+
+
 def build_system_instructions(
     bp: Optional[InterviewBlueprint] = None,
     persona: Optional[PersonaProfile] = None,
@@ -90,21 +130,25 @@ async def entrypoint(ctx: JobContext):
     await ctx.connect()
 
     session_id = ctx.room.name
-    bp = get_blueprint(session_id)
-    if not bp:
-        logger.info("[agent] No pre-registered blueprint found for session %s; using calibrated fallback", session_id)
-        bp = build_fallback_blueprint("Technology Firm", "Software Engineer")
 
-    # Determine persona from participant metadata.
-    # The token endpoint stores persona_id in the participant JWT (.with_metadata()),
-    # NOT in room metadata — so we must read it from the participant, not ctx.room.metadata.
+    # If candidate hasn't arrived yet, await their connection so participant metadata is populated
+    if not ctx.room.remote_participants:
+        logger.info("[agent] Awaiting candidate connection for room %s...", session_id)
+        await ctx.wait_for_participant()
+        logger.info("[agent] Candidate joined room %s", session_id)
+
+    # Determine persona, company, and role from participant and room metadata
     persona_id = "alex"
+    company_from_meta = ""
+    role_from_meta = ""
     try:
-        # First try room metadata (may be set in some deployments)
+        # Check room metadata
         if ctx.room.metadata:
             meta = json.loads(ctx.room.metadata)
-            persona_id = meta.get("persona_id", "alex")
-        # Then check all current participants' metadata (the real source)
+            persona_id = meta.get("persona_id", persona_id)
+            company_from_meta = meta.get("company", "")
+            role_from_meta = meta.get("role", "")
+        # Check participant metadata (the primary source from JWT token)
         for p in ctx.room.remote_participants.values():
             if p.metadata:
                 try:
@@ -112,83 +156,104 @@ async def entrypoint(ctx: JobContext):
                     pid = pmeta.get("persona_id", "")
                     if pid:
                         persona_id = pid
+                    if pmeta.get("company"):
+                        company_from_meta = pmeta.get("company")
+                    if pmeta.get("role"):
+                        role_from_meta = pmeta.get("role")
+                    if pid:
                         break
                 except Exception:
                     pass
-        logger.info("[agent] Resolved persona_id='%s' from participant metadata", persona_id)
+        logger.info("[agent] Resolved metadata: persona='%s', company='%s', role='%s'",
+                    persona_id, company_from_meta, role_from_meta)
     except Exception as e:
-        logger.warning("[agent] Metadata parse failed: %s; using default persona", e)
+        logger.warning("[agent] Metadata parse failed: %s; using defaults", e)
+
+    bp = get_blueprint(session_id)
+    if not bp:
+        logger.info("[agent] No pre-registered blueprint for session %s; using calibrated fallback", session_id)
+        bp = build_fallback_blueprint(
+            company_from_meta or "Technology Firm",
+            role_from_meta or "Software Engineer"
+        )
 
     persona = get_persona(persona_id)
+    company_name = bp.company or company_from_meta or "our engineering team"
+    role_name = bp.role or role_from_meta or "Software Engineer"
+
     logger.info(
-        "[agent] Active persona: %s (%s) | Voice: %s | Max Words: %d",
-        persona.name, persona.title, persona.voice_model, persona.max_words,
+        "[agent] Active persona: %s (%s) | Company: %s | Role: %s | Voice: %s | Max Words: %d",
+        persona.name, persona.title, company_name, role_name, persona.voice_model, persona.max_words,
     )
 
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Build greeting — embedded directly into system instructions so Gemini
-    # Live delivers it as its FIRST utterance via generate_reply().
-    # ─────────────────────────────────────────────────────────────────────────
-    greeting_text = (
-        f"Hi there! I'm {persona.name}, {persona.title}. "
-        "Welcome to your technical interview session with Apex. "
-        f"{persona.signature_phrase} "
-        "Whenever you're ready, let me know and we'll dive right into our first question."
-    )
-
-    # Inject the greeting as the literal first turn in the system instructions.
-    # This ensures Gemini Live speaks it as part of session setup — zero latency
-    # waiting for a user turn to trigger the first response.
-    instructions = build_system_instructions(bp, persona)
-    instructions_with_greeting = (
-        instructions
-        + f"\n\n---\nSESSION START: When the session begins, your VERY FIRST spoken output must be exactly:\n\"{greeting_text}\"\nThen wait for the candidate to respond."
-    )
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Primary Voice Pipeline: Gemini Multimodal Live API
-    # Using gemini-live-2.5-flash-native-audio — the fastest LiveAPI model.
-    # ─────────────────────────────────────────────────────────────────────────
     if not gemini_key:
         raise ValueError("GEMINI_API_KEY is required. Set it in backend/.env.")
 
-    logger.info("[agent] Initializing Gemini Multimodal Live API (model=gemini-live-2.5-flash-native-audio, voice=%s)...", persona.voice_model)
+    # ─────────────────────────────────────────────────────────────────────────
+    # Stage 1 Opening Greeting: Professional introduction + asks candidate to introduce themselves
+    # ─────────────────────────────────────────────────────────────────────────
+    greeting_text = (
+        f"Hi there! I'm {persona.name}, {persona.title} at {company_name}. "
+        f"Welcome to your technical interview for the {role_name} position. "
+        "To get started, could you briefly introduce yourself and share a bit about your background?"
+    )
+
+    instructions = build_system_instructions(bp, persona)
+    instructions_with_greeting = (
+        instructions
+        + f"\n\n---\nSESSION START: When the session begins, your VERY FIRST spoken output must be exactly:\n\"{greeting_text}\"\nThen wait for the candidate to introduce themselves."
+    )
+
+    # Technical vocabulary biasing to boost English ASR accuracy for candidate speech
+    vocab = [
+        "HNSW", "ANN", "WebSocket", "WebSockets", "Kafka", "Redis",
+        "load balancer", "backpressure", "stateless", "Kubernetes",
+        "gRPC", "RPC", "sharding", "replication", "partitioning",
+        "consistency", "throughput", "latency",
+    ]
+    if bp.keywords:
+        vocab.extend(bp.keywords)
+
+    input_audio_transcription = genai_types.AudioTranscriptionConfig(
+        language_codes=["en-US", "en"],
+        custom_vocabulary=vocab[:50],
+    )
+
+    logger.info("[agent] Initializing Gemini Multimodal Live API (model=gemini-2.5-flash-native-audio-preview-12-2025, voice=%s, language=en-US)...", persona.voice_model)
 
     model = realtime.RealtimeModel(
         api_key=gemini_key,
-        model="gemini-2.5-flash-native-audio-preview-12-2025",  # fastest Gemini API native audio model
+        model="gemini-2.5-flash-native-audio-preview-12-2025",
         voice=persona.voice_model,
         instructions=instructions_with_greeting,
-        # Tune endpointing for lower latency:
-        # Shorter silence detection = faster response after candidate stops talking
+        language="en-US",
+        input_audio_transcription=input_audio_transcription,
     )
     agent = Agent(instructions=instructions_with_greeting)
     session = AgentSession(
         llm=model,
-        # Technical interview: candidates need time to think and give detailed answers.
-        # 0.3s was cutting off mid-sentence — 0.8s minimum gives candidates time to pause
-        # and structure complex technical responses without being interrupted.
+        # 0.8s minimum gives candidates time to pause and structure complex technical responses without being interrupted
         min_endpointing_delay=0.8,
         max_endpointing_delay=2.5,
     )
     logger.info("[agent] Gemini Multimodal Live model ready.")
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Real-Time Ledger Synchronization Hooks
+    # Real-Time Ledger Synchronization Hooks (with English Normalization Guard)
     # ─────────────────────────────────────────────────────────────────────────
     @session.on("user_input_transcribed")
     def on_user_transcription(event):
         transcript = getattr(event, "transcript", "").strip()
         is_final = getattr(event, "is_final", False)
         if transcript and is_final:
-            word_count = len(transcript.split())
-            logger.info("[ledger] Candidate speech recorded (%d words)", word_count)
+            clean_text = _normalize_speech_to_english(transcript)
+            word_count = len(clean_text.split())
+            logger.info("[ledger] Candidate speech recorded (%d words): %s", word_count, clean_text[:80])
             ledger_service.record_turn(
                 session_id=session_id,
                 speaker=TurnSpeaker.CANDIDATE,
-                text=transcript,
+                text=clean_text,
                 confidence=1.0,
             )
 
@@ -212,25 +277,10 @@ async def entrypoint(ctx: JobContext):
     await session.start(agent=agent, room=ctx.room)
     logger.info("[agent] WebRTC session active in room %s", ctx.room.name)
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Autonomous Opening Greeting: Interviewer ALWAYS speaks first.
-    # With RealtimeModel, session.say() requires a TTS model — instead we use
-    # generate_reply() which triggers Gemini Live to produce the first spoken
-    # response immediately, delivering the greeting from the instructions.
-    # ─────────────────────────────────────────────────────────────────────────
-    participant = None
-    if ctx.room.remote_participants:
-        participant = next(iter(ctx.room.remote_participants.values()))
-        logger.info("[agent] Found existing participant in room: %s", participant.identity)
-    else:
-        logger.info("[agent] Awaiting candidate connection...")
-        participant = await ctx.wait_for_participant()
-        logger.info("[agent] Candidate connected: %s", participant.identity)
-
-    # Brief 300ms grace sleep (reduced from 500ms) to allow WebRTC audio negotiation
+    # Brief 300ms grace sleep to allow WebRTC audio negotiation
     await asyncio.sleep(0.3)
 
-    logger.info("[agent] Triggering autonomous opening greeting as %s...", persona.name)
+    logger.info("[agent] Triggering autonomous opening greeting as %s (%s at %s)...", persona.name, role_name, company_name)
     try:
         handle = session.generate_reply(
             user_input="Session started. Begin the interview with your opening greeting now.",
