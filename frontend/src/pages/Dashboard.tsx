@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -11,6 +11,7 @@ import {
   Award,
   Check,
   Sparkles,
+  Briefcase,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useInterview } from '../context/InterviewContext';
@@ -18,6 +19,7 @@ import { useInterview } from '../context/InterviewContext';
 interface TrackOption {
   id: string;
   title: string;
+  baseRole: string;
   role: string;
   tagline: string;
   icon: React.ElementType;
@@ -29,38 +31,62 @@ const TRACKS: TrackOption[] = [
   {
     id: 'dist-sys',
     title: 'Distributed Systems & Cloud Infra',
-    role: 'Staff Distributed Systems Engineer',
+    baseRole: 'Distributed Systems Engineer',
+    role: 'Distributed Systems Engineer',
     tagline: 'High-availability, consensus protocols, distributed transactions, and partition tolerance.',
     icon: Server,
     accent: '#38bdf8',
     coreConcepts: ['Raft / Multi-Paxos', 'Quorum Fencing', 'Kafka Event Streaming', 'DynamoDB / Cassandra'],
   },
   {
-    id: 'full-stack',
-    title: 'Full-Stack Product & Scaled APIs',
-    role: 'Senior Full-Stack Systems Engineer',
-    tagline: 'Microservices, real-time bidirectional WebSockets, caching layers, and high-load web engines.',
-    icon: Layers,
-    accent: '#10b981',
-    coreConcepts: ['Distributed Caching', 'WebSocket Multiplexing', 'Idempotency Keys', 'GraphQL Federation'],
-  },
-  {
     id: 'ai-platform',
     title: 'AI / ML Platform & LLM Infrastructure',
-    role: 'Staff AI Infrastructure Engineer',
+    baseRole: 'AI Infrastructure Engineer',
+    role: 'AI Infrastructure Engineer',
     tagline: 'High-throughput LLM inference, vLLM serving, vector search at scale, and KV cache optimization.',
     icon: BrainCircuit,
     accent: '#8b5cf6',
     coreConcepts: ['vLLM PagedAttention', 'HNSW Vector Indexing', 'Quantization (FP8/INT4)', 'Triton Inference Server'],
   },
   {
+    id: 'backend',
+    title: 'Backend & Scaled Microservices',
+    baseRole: 'Backend Engineer',
+    role: 'Backend Engineer',
+    tagline: 'High-concurrency microservices, gRPC, database indexing, caching strategies, and resilient pipelines.',
+    icon: Layers,
+    accent: '#10b981',
+    coreConcepts: ['Idempotency Keys', 'gRPC & Protobuf', 'Redis Caching', 'PostgreSQL Query Optimization'],
+  },
+  {
+    id: 'full-stack',
+    title: 'Full-Stack Product Engineering',
+    baseRole: 'Full-Stack Engineer',
+    role: 'Full-Stack Engineer',
+    tagline: 'End-to-end product architecture, real-time WebSockets, responsive state, and API gateways.',
+    icon: Layers,
+    accent: '#ec4899',
+    coreConcepts: ['WebSocket Multiplexing', 'GraphQL Federation', 'State Management', 'SSR & Hydration'],
+  },
+  {
     id: 'low-latency',
     title: 'High-Throughput & Low-Latency Systems',
-    role: 'Staff Systems Performance Engineer',
+    baseRole: 'Systems Performance Engineer',
+    role: 'Systems Performance Engineer',
     tagline: 'Sub-millisecond processing, zero-copy network buffers, memory layout, and lockless ring queues.',
     icon: Zap,
     accent: '#f59e0b',
     coreConcepts: ['Lock-free Queues', 'Zero-Copy I/O', 'Cache-Line Alignment', 'Kernel Bypass (DPDK)'],
+  },
+  {
+    id: 'sre-devops',
+    title: 'Site Reliability & Infrastructure Platform',
+    baseRole: 'Site Reliability Engineer',
+    role: 'Site Reliability Engineer',
+    tagline: 'Kubernetes orchestration, distributed tracing, automated failover, and SLO/SLA reliability.',
+    icon: Server,
+    accent: '#06b6d4',
+    coreConcepts: ['Kubernetes Operators', 'OpenTelemetry Tracing', 'Chaos Engineering', 'Canary Rollouts'],
   },
 ];
 
@@ -75,7 +101,13 @@ const COMPANIES = [
   'OpenAI',
 ];
 
-const SENIORITY_LEVELS = ['Mid-Level (L4)', 'Senior Engineer (L5)', 'Staff Engineer (L6)', 'Principal Engineer (L7)'];
+const SENIORITY_LEVELS = [
+  'Junior (L3)',
+  'Mid-Level (L4)',
+  'Senior (L5)',
+  'Staff (L6)',
+  'Principal (L7)',
+];
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -92,9 +124,30 @@ export default function Dashboard() {
 
   const [selectedTrackId, setSelectedTrackId] = useState<string>('dist-sys');
 
+  // Keep track highlighting synchronized if targetRole matches a known track
+  useEffect(() => {
+    const matchedTrack = TRACKS.find(t =>
+      targetRole.toLowerCase().includes(t.baseRole.toLowerCase())
+    );
+    if (matchedTrack) {
+      setSelectedTrackId(matchedTrack.id);
+    }
+  }, [targetRole]);
+
   const handleSelectTrack = (track: TrackOption) => {
     setSelectedTrackId(track.id);
-    setTargetRole(track.role);
+    const cleanBase = track.baseRole;
+    const combinedRole = seniority.toLowerCase() === 'mid-level' ? cleanBase : `${seniority} ${cleanBase}`;
+    setTargetRole(combinedRole);
+  };
+
+  const handleSelectSeniority = (levelStr: string) => {
+    const cleanSeniority = levelStr.split(' ')[0];
+    setSeniority(cleanSeniority);
+    // Dynamically update targetRole so seniority is composed with role title
+    const currentBase = targetRole.replace(/^(Junior|Mid-Level|Senior|Staff|Principal)\s+/i, '') || 'Distributed Systems Engineer';
+    const combinedRole = cleanSeniority.toLowerCase() === 'mid-level' ? currentBase : `${cleanSeniority} ${currentBase}`;
+    setTargetRole(combinedRole);
   };
 
   const handleProceed = () => {
@@ -239,6 +292,41 @@ export default function Dashboard() {
             );
           })}
         </div>
+
+        {/* Active Role Quick Editor */}
+        <div
+          style={{
+            marginTop: 18,
+            padding: '12px 18px',
+            borderRadius: 10,
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <Briefcase size={16} color="#818cf8" />
+          <span style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap', fontWeight: 600 }}>
+            Active Role:
+          </span>
+          <input
+            type="text"
+            value={targetRole}
+            onChange={(e) => setTargetRole(e.target.value)}
+            placeholder="e.g. Staff Distributed Systems Engineer"
+            style={{
+              flex: 1,
+              padding: '7px 12px',
+              fontSize: 13,
+              borderRadius: 6,
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: '#f8fafc',
+              outline: 'none',
+            }}
+          />
+        </div>
       </div>
 
       {/* Target Company & Seniority Configuration */}
@@ -304,7 +392,7 @@ export default function Dashboard() {
                   <button
                     key={level}
                     type="button"
-                    onClick={() => setSeniority(level.split(' ')[0])}
+                    onClick={() => handleSelectSeniority(level)}
                     style={{
                       padding: '8px 12px',
                       borderRadius: 8,
@@ -348,7 +436,7 @@ export default function Dashboard() {
             CONFIGURED CALIBRATION
           </div>
           <div style={{ fontSize: 15, fontWeight: 700, color: '#f8fafc' }}>
-            {targetCompany} · {targetRole} ({seniority})
+            {targetCompany} · {targetRole}
           </div>
         </div>
 
