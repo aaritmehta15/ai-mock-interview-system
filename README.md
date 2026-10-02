@@ -347,15 +347,32 @@ Apex Interview AI was intentionally engineered from day one to operate sustainab
 
 ---
 
-## 🛡️ License
+## 🛡️ License & Mandatory Attribution
 
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more details.
+This project is licensed under the **MIT License** — see [`LICENSE`](LICENSE) for complete details.
+
+### ⚖️ Strict Attribution Requirement
+If you fork, adapt, reference, or build upon this codebase, its architecture, or its concepts (including the *Append-Only SQLite Turn Ledger*, the *Anti-Phantom Evaluation Protocol*, the *Dynamic Blueprint Engine*, or the *Sub-650ms WebRTC Voice Pipeline*):
+1. **Mandatory Credit**: You **MUST** provide prominent, clear credit to **Aarit Mehta** as the original creator.
+2. **Repository Backlink**: You **MUST** include a direct, visible link back to this original repository:
+   `https://github.com/aaritmehta15/ai-mock-interview-system`
+3. **Academic & Portfolio Integrity**: You may **NOT** claim this architecture or project as your own original work in academic evaluations, hackathons, portfolio submissions, or commercial products without explicit credit.
+
+```bibtex
+@software{mehta2026apexinterview,
+  author = {Mehta, Aarit},
+  title = {Apex Interview AI: Evidence-Grounded WebRTC Voice Technical Interviewer & Anti-Phantom Dossier},
+  url = {https://github.com/aaritmehta15/ai-mock-interview-system},
+  year = {2026}
+}
+```
 
 ---
 
-## 👨‍💻 Author
+## 👨‍💻 Author & Creator
 
 **Aarit Mehta**  
 *Final-Year B.Tech in Artificial Intelligence & Data Science (Graduating 2027)*  
 - **GitHub**: [@aaritmehta15](https://github.com/aaritmehta15)  
 - **Repository**: [ai-mock-interview-system](https://github.com/aaritmehta15/ai-mock-interview-system)
+

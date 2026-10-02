@@ -82,3 +82,15 @@ We adhere to the [Conventional Commits](https://www.conventionalcommits.org/) sp
 2. Open a Pull Request against the `main` branch.
 3. Provide a clear summary of the changes, the problem solved, and verification evidence (test outputs or screenshots).
 4. A maintainer will review your PR and provide feedback.
+
+---
+
+## ⚖️ Mandatory Attribution & Derivative Works Policy
+
+If you fork, adapt, benchmark, build upon, or reference this codebase or its underlying architectural concepts (including the *Append-Only SQLite Turn Ledger*, the *Anti-Phantom Evaluation Protocol*, the *Dynamic Blueprint Engine*, or the *Sub-650ms WebRTC Voice Pipeline*):
+
+1. **Mandatory Credit**: You **MUST** provide clear, prominent credit to **Aarit Mehta** as the original creator.
+2. **Visible Repository Link**: You **MUST** link back directly to this original repository in your `README.md`, documentation, or publication:  
+   `https://github.com/aaritmehta15/ai-mock-interview-system`
+3. **Academic & Commercial Integrity**: You may **NOT** republish this project or its architecture as entirely your own work for academic submissions, competitions, or commercial products without explicit attribution.
+
