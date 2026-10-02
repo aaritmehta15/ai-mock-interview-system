@@ -104,7 +104,8 @@ export default function Evaluation() {
     return () => {
       isMounted = false;
     };
-  }, [activeSessionId, latestReport, setLatestReport]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId]);
 
   const toggleQuestion = (id: string) => {
     setExpandedQuestions((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -393,7 +394,7 @@ export default function Evaluation() {
           Candidate Assessment & Hiring Committee Dossier
         </h1>
         <p style={{ color: '#94a3b8', fontSize: 14 }}>
-          Calibrated assessment for <strong>{report.company || targetCompany}</strong> · <strong>{report.role || targetRole}</strong>.
+          Calibrated assessment for <strong>{report.company || targetCompany || 'Target Organization'}</strong> · <strong>{report.role || targetRole || 'Software Engineering Track'}</strong>.
           Evaluated strictly against verified turns in the SQLite Turn Ledger.
         </p>
       </motion.div>

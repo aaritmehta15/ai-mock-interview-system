@@ -68,6 +68,17 @@ export default function Interview() {
     id: selectedPersonaId || 'alex',
   };
 
+  const wrapperPersona = useMemo(() => ({
+    ...persona,
+    archetype: persona.difficulty,
+    badge_label: persona.title,
+    tagline: persona.signature_phrase,
+    pause_tolerance_seconds: persona.pause_tolerance,
+    thinking_pause_seconds: persona.thinking_delay,
+    probe_style: 'Calibrated Socratic Assessment',
+    traits: [persona.signature_phrase],
+  }), [persona]);
+
   const handleStartVoiceSession = async () => {
     setIsConnecting(true);
     setConnectionError(null);
@@ -163,17 +174,6 @@ export default function Interview() {
       </div>
     );
   }
-
-  const wrapperPersona = useMemo(() => ({
-    ...persona,
-    archetype: persona.difficulty,
-    badge_label: persona.title,
-    tagline: persona.signature_phrase,
-    pause_tolerance_seconds: persona.pause_tolerance,
-    thinking_pause_seconds: persona.thinking_delay,
-    probe_style: 'Calibrated Socratic Assessment',
-    traits: [persona.signature_phrase],
-  }), [persona]);
 
   return (
     <div style={{ maxWidth: 1040, margin: '0 auto', padding: '36px 24px' }}>

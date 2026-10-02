@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { InterviewProvider } from './context/InterviewContext';
+import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
@@ -15,11 +16,12 @@ import History from './pages/History';
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <InterviewProvider>
-          <BrowserRouter>
-            <Routes>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <InterviewProvider>
+            <BrowserRouter>
+              <Routes>
               {/* Standalone Gateway & Tour Pages */}
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />
@@ -44,5 +46,6 @@ export default function App() {
         </InterviewProvider>
       </AuthProvider>
     </ThemeProvider>
+  </ErrorBoundary>
   );
 }
