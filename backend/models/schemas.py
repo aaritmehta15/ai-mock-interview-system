@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 # ── Core Enums ────────────────────────────────────────────────────────────────
 
 class SeniorityLevel(str, Enum):
+    STUDENT = "Student / Intern"
     JUNIOR = "Junior"
     MID = "Mid-Level"
     SENIOR = "Senior"
@@ -53,7 +54,10 @@ class BlueprintQuestion(BaseModel):
     competency: str = Field(..., description="Core engineering competency evaluated, e.g. 'Distributed Systems & Concurrency'")
     category: QuestionCategory = Field(default=QuestionCategory.SYSTEM_DESIGN)
     assertions: List[BinaryAssertion] = Field(default_factory=list, description="List of verifiable binary criteria")
-    model_answer: str = Field(..., description="Staff Engineer reference benchmark answer")
+    model_answer: str = Field(
+        default="Reference benchmark answer demonstrating core algorithmic concepts, asymptotic complexity, and trade-offs.",
+        description="Reference benchmark answer"
+    )
 
 
 class InterviewBlueprint(BaseModel):
@@ -64,6 +68,12 @@ class InterviewBlueprint(BaseModel):
     company: str
     role: str
     seniority: SeniorityLevel = SeniorityLevel.MID
+    domain: Optional[str] = Field(default=None, description="Detected or calibrated engineering discipline")
+    primary_language: Optional[str] = Field(default="Python", description="Candidate's primary programming language / stack")
+    interview_focus: Optional[str] = Field(default="Balanced Screening", description="Target interview practice round")
+    spotlight_topic: Optional[str] = Field(default="", description="Specific candidate project or topic spotlight")
+    strategy_summary: Optional[str] = Field(default="", description="Executive strategy summary of what this interview evaluates")
+    preparation_tips: List[str] = Field(default_factory=list, description="Actionable tips for candidate success in this session")
     keywords: List[str] = Field(default_factory=list, description="Pre-boosted technical speech vocabulary for STT")
     rounds: List[str] = Field(default_factory=lambda: ["System Architecture", "Trade-Off Analysis"])
     questions: List[BlueprintQuestion] = Field(default_factory=list)

@@ -121,6 +121,9 @@ class BlueprintRequest(BaseModel):
     jd_text: str = ""
     session_id: Optional[str] = None
     persona_id: Optional[str] = "alex"
+    primary_language: Optional[str] = "Python"
+    interview_focus: Optional[str] = "Balanced Screening"
+    spotlight_topic: Optional[str] = ""
 
 
 class RecordTurnRequest(BaseModel):
@@ -183,6 +186,9 @@ async def create_blueprint_endpoint(req: BlueprintRequest):
             resume_text=req.resume_text,
             jd_text=req.jd_text,
             seniority=req.seniority,
+            primary_language=req.primary_language,
+            interview_focus=req.interview_focus,
+            spotlight_topic=req.spotlight_topic,
         )
         save_blueprint(bp.blueprint_id, bp)
         if req.session_id:
@@ -197,7 +203,7 @@ async def create_blueprint_endpoint(req: BlueprintRequest):
         return bp
     except Exception as e:
         logger.error("[api] Blueprint generation failed: %s", e)
-        fallback = build_fallback_blueprint(req.company, req.role)
+        fallback = build_fallback_blueprint(req.company, req.role, req.seniority)
         save_blueprint(fallback.blueprint_id, fallback)
         if req.session_id:
             save_blueprint(req.session_id, fallback)
@@ -225,6 +231,9 @@ async def upload_resume_and_create_blueprint(
     jd_text: str = Form(""),
     session_id: Optional[str] = Form(None),
     persona_id: str = Form("alex"),
+    primary_language: Optional[str] = Form("Python"),
+    interview_focus: Optional[str] = Form("Balanced Screening"),
+    spotlight_topic: Optional[str] = Form(""),
 ):
     """Accepts PDF resume upload, extracts text via pypdf, and generates calibrated blueprint."""
     try:
@@ -236,6 +245,9 @@ async def upload_resume_and_create_blueprint(
             resume_text=extracted_text,
             jd_text=jd_text,
             seniority=seniority,
+            primary_language=primary_language,
+            interview_focus=interview_focus,
+            spotlight_topic=spotlight_topic,
         )
         save_blueprint(bp.blueprint_id, bp)
         if session_id:
@@ -250,7 +262,7 @@ async def upload_resume_and_create_blueprint(
         return bp
     except Exception as e:
         logger.error("[api] PDF resume processing failed: %s", e)
-        fallback = build_fallback_blueprint(company, role)
+        fallback = build_fallback_blueprint(company, role, seniority)
         save_blueprint(fallback.blueprint_id, fallback)
         if session_id:
             save_blueprint(session_id, fallback)

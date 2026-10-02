@@ -15,6 +15,10 @@ import {
   Users,
   FileText,
   Volume2,
+  Code2,
+  Target,
+  Lightbulb,
+  CheckCircle2,
 } from 'lucide-react';
 import { useInterview } from '../context/InterviewContext';
 import { createBlueprint, uploadResumePdf, type InterviewBlueprint, type PersonaProfile } from '../lib/api';
@@ -89,6 +93,9 @@ export default function Intake() {
   const [setupMode, setSetupMode] = useState<'quick' | 'resume_pdf' | 'resume_text'>('quick');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [resumeText, setResumeText] = useState<string>('');
+  const [primaryLanguage, setPrimaryLanguage] = useState<string>('Python');
+  const [interviewFocus, setInterviewFocus] = useState<string>('Balanced Screening');
+  const [spotlightTopic, setSpotlightTopic] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [auditioningId, setAuditioningId] = useState<string | null>(null);
@@ -144,7 +151,10 @@ export default function Intake() {
           targetRole,
           seniority,
           sessionId,
-          selectedPersonaId
+          selectedPersonaId,
+          primaryLanguage,
+          interviewFocus,
+          spotlightTopic
         );
       } else {
         const textToSubmit = setupMode === 'resume_text' ? resumeText.trim() : '';
@@ -155,6 +165,9 @@ export default function Intake() {
           resume_text: textToSubmit,
           session_id: sessionId,
           persona_id: selectedPersonaId,
+          primary_language: primaryLanguage,
+          interview_focus: interviewFocus,
+          spotlight_topic: spotlightTopic,
         });
       }
       setBlueprint(bp);
@@ -274,6 +287,7 @@ export default function Intake() {
                 cursor: 'pointer',
               }}
             >
+              <option value="Student / Intern">🎓 Student / Intern / Fresher</option>
               <option value="Junior">Junior (L3 / SDE I)</option>
               <option value="Mid-Level">Mid-Level (L4 / SDE II)</option>
               <option value="Senior">Senior (L5 / Senior SDE)</option>
@@ -308,6 +322,119 @@ export default function Intake() {
         </div>
       </div>
 
+      {/* 2. Candidate Focus & Technical Stack */}
+      <div
+        className="studio-card"
+        style={{
+          padding: '20px 24px',
+          background: 'rgba(14, 18, 28, 0.85)',
+          border: '1px solid rgba(255, 255, 255, 0.09)',
+          marginBottom: 24,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Target size={15} color="#38bdf8" />
+          <span>2. Preparation Focus & Language Stack</span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Primary Language */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Code2 size={13} />
+              PRIMARY PROGRAMMING LANGUAGE / STACK
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {['Python', 'TypeScript / JS', 'Java', 'C++', 'Go', 'Rust', 'Other'].map((lang) => {
+                const isSelected = primaryLanguage === lang;
+                return (
+                  <button
+                    key={lang}
+                    type="button"
+                    onClick={() => setPrimaryLanguage(lang)}
+                    style={{
+                      padding: '7px 14px',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: isSelected ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.1)',
+                      background: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                      color: isSelected ? '#38bdf8' : '#94a3b8',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {lang}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Interview Practice Focus */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#10b981', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Target size={13} />
+              INTERVIEW PRACTICE FOCUS
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {[
+                { id: 'Balanced Screening', label: '🎯 Balanced Screening' },
+                { id: 'Project Deep-Dive', label: '🚀 Project Deep-Dive' },
+                { id: 'Coding & DSA', label: '💻 Coding & DSA' },
+                { id: 'System Design', label: '🏗️ System Design' },
+              ].map((focus) => {
+                const isSelected = interviewFocus === focus.id;
+                return (
+                  <button
+                    key={focus.id}
+                    type="button"
+                    onClick={() => setInterviewFocus(focus.id)}
+                    style={{
+                      padding: '7px 14px',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: isSelected ? '1px solid #10b981' : '1px solid rgba(255, 255, 255, 0.1)',
+                      background: isSelected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                      color: isSelected ? '#10b981' : '#94a3b8',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {focus.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Specific Spotlight Topic */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#a855f7', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Sparkles size={13} />
+              SPECIFIC TOPIC OR PROJECT TO SPOTLIGHT (OPTIONAL)
+            </label>
+            <input
+              type="text"
+              value={spotlightTopic}
+              onChange={(e) => setSpotlightTopic(e.target.value)}
+              placeholder="e.g. Grill me on my capstone Redis caching layer, React rendering, or SQL indexing..."
+              style={{
+                fontSize: 13,
+                padding: '9px 12px',
+                width: '100%',
+                borderRadius: 8,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: '#f8fafc',
+                outline: 'none',
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* Mode Selection Tabs (Resume vs Custom Role) */}
       <div
         className="studio-card"
@@ -320,7 +447,7 @@ export default function Intake() {
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc' }}>
-            2. Choose Question Generation Source
+            3. Choose Question Generation Source
           </div>
 
           <div style={{ display: 'flex', gap: 6 }}>
@@ -465,7 +592,7 @@ export default function Intake() {
         )}
       </div>
 
-      {/* 3. Interviewer Persona Choice */}
+      {/* 4. Interviewer Persona Choice */}
       <div
         className="studio-card"
         style={{
@@ -477,7 +604,7 @@ export default function Intake() {
       >
         <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Users size={15} color="#818cf8" />
-          <span>3. Select Interviewer Persona</span>
+          <span>4. Select Interviewer Persona</span>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
@@ -591,6 +718,57 @@ export default function Intake() {
               {isGenerating ? 'Synthesizing...' : 'Regenerate Questions'}
             </button>
           </div>
+
+          {/* Strategy Briefing Card */}
+          {(blueprint.strategy_summary || (blueprint.preparation_tips && blueprint.preparation_tips.length > 0)) && (
+            <div
+              style={{
+                marginBottom: 20,
+                padding: 16,
+                borderRadius: 10,
+                background: 'rgba(99, 102, 241, 0.08)',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Lightbulb size={16} color="#818cf8" />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc' }}>
+                    Personalized Strategy & Candidate Coaching Briefing
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {blueprint.domain && (
+                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', fontWeight: 600 }}>
+                      {blueprint.domain}
+                    </span>
+                  )}
+                  {blueprint.primary_language && (
+                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: 600 }}>
+                      Stack: {blueprint.primary_language}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {blueprint.strategy_summary && (
+                <p style={{ fontSize: 13, color: '#cbd5e1', margin: '0 0 10px 0', lineHeight: 1.5 }}>
+                  {blueprint.strategy_summary}
+                </p>
+              )}
+
+              {blueprint.preparation_tips && blueprint.preparation_tips.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {blueprint.preparation_tips.map((tip, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#94a3b8' }}>
+                      <CheckCircle2 size={14} color="#10b981" style={{ marginTop: 2, flexShrink: 0 }} />
+                      <span>{tip}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 300, overflowY: 'auto' }}>
             {blueprint.questions.map((q, idx) => (

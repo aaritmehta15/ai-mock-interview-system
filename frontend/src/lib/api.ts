@@ -34,7 +34,14 @@ export interface InterviewBlueprint {
   company: string;
   role: string;
   seniority: string;
+  domain?: string;
+  primary_language?: string;
+  interview_focus?: string;
+  spotlight_topic?: string;
+  strategy_summary?: string;
+  preparation_tips?: string[];
   keywords: string[];
+  rounds?: string[];
   questions: BlueprintQuestion[];
   created_at?: string;
 }
@@ -187,6 +194,9 @@ export const createBlueprint = (payload: {
   resume_text?: string;
   session_id?: string;
   persona_id?: string;
+  primary_language?: string;
+  interview_focus?: string;
+  spotlight_topic?: string;
 }): Promise<InterviewBlueprint> => api.post('/api/blueprint', payload).then(r => r.data);
 
 export const uploadResumePdf = async (
@@ -195,15 +205,21 @@ export const uploadResumePdf = async (
   role: string,
   seniority: string = 'Senior',
   sessionId?: string,
-  personaId: string = 'alex'
+  personaId: string = 'alex',
+  primaryLanguage: string = 'Python',
+  interviewFocus: string = 'Balanced Screening',
+  spotlightTopic: string = ''
 ): Promise<InterviewBlueprint> => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('company', company);
   formData.append('role', role);
   formData.append('seniority', seniority);
-  if (sessionId) formData.append('session_id', sessionId);
   formData.append('persona_id', personaId);
+  formData.append('primary_language', primaryLanguage);
+  formData.append('interview_focus', interviewFocus);
+  formData.append('spotlight_topic', spotlightTopic);
+  if (sessionId) formData.append('session_id', sessionId);
 
   const res = await api.post('/api/blueprint/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },

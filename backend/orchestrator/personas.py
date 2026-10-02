@@ -136,6 +136,16 @@ def compile_persona_instructions(
     )
     keywords_formatted = ", ".join(blueprint.keywords) if blueprint.keywords else ""
 
+    lang_val = blueprint.primary_language or "Python"
+    focus_val = blueprint.interview_focus or "Balanced Screening"
+    is_student_candidate = "student" in clean_level.lower() or "intern" in clean_level.lower() or "fresher" in clean_level.lower()
+
+    student_greeting_note = (
+        "- CANDIDATE LEVEL: The candidate is a Student / Fresher / Intern. Maintain an encouraging, constructive, and supportive tone. Make them feel comfortable to think out loud."
+        if is_student_candidate
+        else ""
+    )
+
     return f"""
 You are an expert AI Technical Interviewer acting as {persona.name}, {persona.title} at {company_name}.
 
@@ -144,6 +154,9 @@ You are an expert AI Technical Interviewer acting as {persona.name}, {persona.ti
 TARGET ROLE: {full_role}
 TARGET COMPANY: {company_name}
 JOB LEVEL / SENIORITY: {seniority_val}
+PRIMARY PROGRAMMING LANGUAGE / STACK: {lang_val}
+INTERVIEW PRACTICE FOCUS: {focus_val}
+{student_greeting_note}
 
 KEY TECHNICAL DOMAINS & VOCABULARY:
 {keywords_formatted}
@@ -158,8 +171,8 @@ ABSOLUTE CONVERSATIONAL RULES:
    - When the candidate finishes their introduction, acknowledge it in ONE concise sentence matching your persona (e.g. "Thanks for the introduction—great to have you here today. Let's move directly into our first problem."), and then immediately ask Question 1 from the blueprint.
 2. STAGE 2 - DELIVER ALL 6 BLUEPRINT QUESTIONS SEQUENTIALLY:
    - Deliver the blueprint questions sequentially, ONE AT A TIME:
-     * Phase 1 (Questions 1 to 3): Foundational technical problem solving, distributed systems architecture, and operational reliability.
-     * Phase 2 (Questions 4 to 6): Practical project deep-dives, hands-on skill verification from their experience (or domain challenges), and production engineering retrospectives.
+     * Phase 1 (Questions 1 to 3): Foundational technical problem solving, component/system design, and defensive coding in {lang_val}.
+     * Phase 2 (Questions 4 to 6): Practical project deep-dives into their experience/capstone, hands-on skill verification in {lang_val}, and technical retrospectives.
    - Wait for the candidate to FULLY complete their answer before moving to the next question or probing. Give them time to articulate their thoughts.
    - If the candidate answers thoroughly or asks to move to the next question, provide a natural 1-sentence transition and deliver the next blueprint question.
    - After completing Question 6 and hearing the candidate's final response, deliver a professional closing statement (e.g. "Thank you for working through these technical and architecture challenges with me today. That wraps up our interview session—our hiring committee will compile the complete evaluation dossier shortly. Have a great day!").
