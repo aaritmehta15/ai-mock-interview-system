@@ -19,6 +19,7 @@ import {
   Target,
   Lightbulb,
   CheckCircle2,
+  Check,
 } from 'lucide-react';
 import { useInterview } from '../context/InterviewContext';
 import { createBlueprint, uploadResumePdf, type InterviewBlueprint, type PersonaProfile } from '../lib/api';
@@ -93,12 +94,32 @@ export default function Intake() {
   const [setupMode, setSetupMode] = useState<'quick' | 'resume_pdf' | 'resume_text'>('quick');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [resumeText, setResumeText] = useState<string>('');
-  const [primaryLanguage, setPrimaryLanguage] = useState<string>('Python');
-  const [interviewFocus, setInterviewFocus] = useState<string>('Balanced Screening');
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['Python']);
+  const [selectedFocuses, setSelectedFocuses] = useState<string[]>(['Balanced Screening']);
   const [spotlightTopic, setSpotlightTopic] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [auditioningId, setAuditioningId] = useState<string | null>(null);
+
+  const toggleLanguage = (lang: string) => {
+    setSelectedLanguages((prev) => {
+      if (prev.includes(lang)) {
+        if (prev.length === 1) return prev; // keep at least 1 selected
+        return prev.filter((l) => l !== lang);
+      }
+      return [...prev, lang];
+    });
+  };
+
+  const toggleFocus = (focusId: string) => {
+    setSelectedFocuses((prev) => {
+      if (prev.includes(focusId)) {
+        if (prev.length === 1) return prev; // keep at least 1 selected
+        return prev.filter((f) => f !== focusId);
+      }
+      return [...prev, focusId];
+    });
+  };
 
   const onDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -142,6 +163,9 @@ export default function Intake() {
     setIsGenerating(true);
     setErrorMsg(null);
 
+    const combinedLanguages = selectedLanguages.join(', ');
+    const combinedFocuses = selectedFocuses.join(' + ');
+
     try {
       let bp: InterviewBlueprint;
       if (setupMode === 'resume_pdf' && uploadedFile) {
@@ -152,8 +176,8 @@ export default function Intake() {
           seniority,
           sessionId,
           selectedPersonaId,
-          primaryLanguage,
-          interviewFocus,
+          combinedLanguages,
+          combinedFocuses,
           spotlightTopic
         );
       } else {
@@ -165,8 +189,8 @@ export default function Intake() {
           resume_text: textToSubmit,
           session_id: sessionId,
           persona_id: selectedPersonaId,
-          primary_language: primaryLanguage,
-          interview_focus: interviewFocus,
+          primary_language: combinedLanguages,
+          interview_focus: combinedFocuses,
           spotlight_topic: spotlightTopic,
         });
       }
@@ -340,30 +364,40 @@ export default function Intake() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Primary Language */}
           <div>
-            <label style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <Code2 size={13} />
-              PRIMARY PROGRAMMING LANGUAGE / STACK
-            </label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                <Code2 size={13} />
+                PRIMARY PROGRAMMING LANGUAGE / STACK
+              </label>
+              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 500 }}>
+                Select one or multiple ({selectedLanguages.length} selected)
+              </span>
+            </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {['Python', 'TypeScript / JS', 'Java', 'C++', 'Go', 'Rust', 'Other'].map((lang) => {
-                const isSelected = primaryLanguage === lang;
+                const isSelected = selectedLanguages.includes(lang);
                 return (
                   <button
                     key={lang}
                     type="button"
-                    onClick={() => setPrimaryLanguage(lang)}
+                    onClick={() => toggleLanguage(lang)}
                     style={{
                       padding: '7px 14px',
                       borderRadius: 8,
                       fontSize: 12,
                       fontWeight: 600,
                       cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
                       border: isSelected ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.1)',
-                      background: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                      background: isSelected ? 'rgba(56, 189, 248, 0.18)' : 'rgba(255, 255, 255, 0.03)',
                       color: isSelected ? '#38bdf8' : '#94a3b8',
+                      boxShadow: isSelected ? '0 0 14px rgba(56, 189, 248, 0.22)' : 'none',
                       transition: 'all 0.15s ease',
                     }}
                   >
+                    {isSelected && <Check size={13} strokeWidth={3} />}
                     {lang}
                   </button>
                 );
@@ -373,10 +407,15 @@ export default function Intake() {
 
           {/* Interview Practice Focus */}
           <div>
-            <label style={{ fontSize: 11, fontWeight: 700, color: '#10b981', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <Target size={13} />
-              INTERVIEW PRACTICE FOCUS
-            </label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: '#10b981', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                <Target size={13} />
+                INTERVIEW PRACTICE FOCUS
+              </label>
+              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 500 }}>
+                Select one or multiple ({selectedFocuses.length} selected)
+              </span>
+            </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {[
                 { id: 'Balanced Screening', label: '🎯 Balanced Screening' },
@@ -384,24 +423,29 @@ export default function Intake() {
                 { id: 'Coding & DSA', label: '💻 Coding & DSA' },
                 { id: 'System Design', label: '🏗️ System Design' },
               ].map((focus) => {
-                const isSelected = interviewFocus === focus.id;
+                const isSelected = selectedFocuses.includes(focus.id);
                 return (
                   <button
                     key={focus.id}
                     type="button"
-                    onClick={() => setInterviewFocus(focus.id)}
+                    onClick={() => toggleFocus(focus.id)}
                     style={{
                       padding: '7px 14px',
                       borderRadius: 8,
                       fontSize: 12,
                       fontWeight: 600,
                       cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
                       border: isSelected ? '1px solid #10b981' : '1px solid rgba(255, 255, 255, 0.1)',
-                      background: isSelected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                      background: isSelected ? 'rgba(16, 185, 129, 0.18)' : 'rgba(255, 255, 255, 0.03)',
                       color: isSelected ? '#10b981' : '#94a3b8',
+                      boxShadow: isSelected ? '0 0 14px rgba(16, 185, 129, 0.22)' : 'none',
                       transition: 'all 0.15s ease',
                     }}
                   >
+                    {isSelected && <Check size={13} strokeWidth={3} />}
                     {focus.label}
                   </button>
                 );
