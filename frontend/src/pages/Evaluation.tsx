@@ -12,6 +12,7 @@ import {
   ChevronUp,
   Terminal,
   Loader2,
+  History as HistoryIcon,
 } from 'lucide-react';
 import { useInterview } from '../context/InterviewContext';
 import {
@@ -49,21 +50,36 @@ export default function Evaluation() {
     let isMounted = true;
 
     async function loadData() {
-      if (!activeSessionId) return;
+      if (!activeSessionId) {
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
       setErrorMsg(null);
 
       try {
         const isCacheValid = latestReport && latestReport.session_id === activeSessionId;
-        const [evalReport, ledgerData] = await Promise.all([
-          isCacheValid ? Promise.resolve(latestReport) : evaluateSession(activeSessionId),
-          getLedger(activeSessionId).catch(() => null),
-        ]);
+
+        // Fetch ledger first to verify turn count and avoid evaluating empty sessions
+        const ledgerData = await getLedger(activeSessionId).catch(() => null);
+        if (isMounted && ledgerData) {
+          setLedger(ledgerData);
+        }
+
+        // If no matching cache and ledger has zero turns, don't trigger zero-turn evaluation
+        if (!isCacheValid && (!ledgerData || ledgerData.turns_count === 0)) {
+          if (isMounted) {
+            setReport(null);
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        const evalReport = isCacheValid ? latestReport : await evaluateSession(activeSessionId);
 
         if (isMounted) {
           setReport(evalReport);
           setLatestReport(evalReport);
-          if (ledgerData) setLedger(ledgerData);
 
           // default first question expanded
           if (evalReport?.question_evaluations?.length) {
@@ -102,14 +118,14 @@ export default function Evaluation() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `apex_dossier_${activeSessionId}.json`;
+    a.download = `ai_mock_interviewer_dossier_${activeSessionId}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   const handleStartNewSession = () => {
     resetSession();
-    navigate('/dashboard');
+    navigate('/setup');
   };
 
   const getRecommendationBadge = (rec: string) => {
@@ -150,32 +166,115 @@ export default function Evaluation() {
   }
 
   if (errorMsg || !report) {
+    const isNoSession = !errorMsg && !report;
     return (
       <div style={{ maxWidth: 640, margin: '60px auto', padding: 24 }}>
         <div
           className="studio-card"
           style={{
-            padding: 32,
-            border: '1px solid rgba(244, 63, 94, 0.3)',
-            background: 'rgba(244, 63, 94, 0.04)',
+            padding: 40,
+            border: isNoSession ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(244, 63, 94, 0.3)',
+            background: isNoSession ? 'rgba(14, 18, 28, 0.85)' : 'rgba(244, 63, 94, 0.04)',
             textAlign: 'center',
           }}
         >
-          <AlertCircle size={40} color="#f43f5e" style={{ margin: '0 auto 16px' }} />
-          <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
-            Evaluation Dossier Unavailable
-          </h2>
-          <p style={{ color: '#94a3b8', fontSize: 13, marginBottom: 24, lineHeight: 1.5 }}>
-            {errorMsg || 'No completed interview session found for evaluation.'}
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate('/interview')}
-            className="btn-primary"
-            style={{ padding: '10px 20px', fontSize: 13 }}
-          >
-            Return to Sound Studio
-          </button>
+          {isNoSession ? (
+            <>
+              <div
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 16,
+                  background: 'rgba(99, 102, 241, 0.12)',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#818cf8',
+                  marginBottom: 18,
+                }}
+              >
+                <ShieldCheck size={28} />
+              </div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: '#f8fafc', marginBottom: 8 }}>
+                No Active Interview to Evaluate
+              </h2>
+              <p
+                style={{
+                  color: '#94a3b8',
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  maxWidth: 460,
+                  margin: '0 auto 24px',
+                }}
+              >
+                You have not completed a voice interview session yet, or this session does not contain recorded turns.
+                You can start a new interview or browse your past evaluation reports.
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => navigate('/setup')}
+                  className="btn-primary"
+                  style={{ padding: '10px 20px', fontSize: 13 }}
+                >
+                  Start New Interview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/history')}
+                  style={{
+                    padding: '10px 20px',
+                    fontSize: 13,
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: 8,
+                    color: '#f8fafc',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Past Sessions
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <AlertCircle size={40} color="#f43f5e" style={{ margin: '0 auto 16px' }} />
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8, color: '#f8fafc' }}>
+                Evaluation Dossier Unavailable
+              </h2>
+              <p style={{ color: '#94a3b8', fontSize: 13, marginBottom: 24, lineHeight: 1.5 }}>
+                {errorMsg}
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => navigate('/setup')}
+                  className="btn-primary"
+                  style={{ padding: '10px 20px', fontSize: 13 }}
+                >
+                  Start New Interview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/history')}
+                  style={{
+                    padding: '10px 20px',
+                    fontSize: 13,
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: 8,
+                    color: '#f8fafc',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Past Sessions
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );
@@ -201,37 +300,101 @@ export default function Evaluation() {
     <div style={{ maxWidth: 1040, margin: '0 auto', padding: '40px 24px' }}>
       {/* Top Banner: Stage & Ledger Verification */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
           <span className="status-pill status-pill-emerald">
             <ShieldCheck size={12} />
-            STAGE 5 OF 5 · HIRING COMMITTEE DOSSIER
+            EVALUATION REPORT · EVIDENCE GROUNDED
           </span>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span
               style={{
                 fontSize: 11,
                 fontFamily: "'JetBrains Mono', monospace",
                 color: '#64748b',
+                marginRight: 6,
               }}
             >
               SHA-256: {report.session_hash ? report.session_hash.slice(0, 16) + '...' : 'VERIFIED'}
             </span>
+
+            <button
+              type="button"
+              onClick={handleDownloadJSON}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                borderRadius: 8,
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                color: '#cbd5e1',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              <Download size={13} />
+              <span>Export JSON</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate('/history')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                borderRadius: 8,
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                color: '#cbd5e1',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              <HistoryIcon size={13} />
+              <span>Past Sessions</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleStartNewSession}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 14px',
+                borderRadius: 8,
+                background: 'rgba(99, 102, 241, 0.2)',
+                border: '1px solid rgba(99, 102, 241, 0.4)',
+                color: '#818cf8',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              <RotateCcw size={13} />
+              <span>New Interview</span>
+            </button>
           </div>
         </div>
 
         <h1
           style={{
-            fontSize: 30,
+            fontSize: 28,
             fontWeight: 800,
             fontFamily: "'Space Grotesk', sans-serif",
             letterSpacing: '-0.025em',
             marginBottom: 6,
           }}
         >
-          Staff Hiring Committee Executive Dossier
+          Candidate Assessment & Hiring Committee Dossier
         </h1>
         <p style={{ color: '#94a3b8', fontSize: 14 }}>
-          Calibrated assessment for {targetCompany} · {targetRole}. Verified mathematically against the SQLite Turn Ledger.
+          Calibrated assessment for <strong>{report.company || targetCompany}</strong> · <strong>{report.role || targetRole}</strong>.
+          Evaluated strictly against verified turns in the SQLite Turn Ledger.
         </p>
       </motion.div>
 

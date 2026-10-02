@@ -77,7 +77,7 @@ export default function Login() {
               marginBottom: 8,
             }}
           >
-            APEX INTERVIEW OS
+            AI MOCK INTERVIEWER
           </h1>
           <p style={{ color: '#94a3b8', fontSize: 14 }}>
             Autonomous Real-Time Technical Voice Assessment for Senior & Staff Engineers

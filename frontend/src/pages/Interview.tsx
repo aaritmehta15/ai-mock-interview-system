@@ -171,7 +171,7 @@ export default function Interview() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <span className="status-pill status-pill-amber">
             <Activity size={12} />
-            STAGE 4 OF 5 · FULL-DUPLEX SOUND STUDIO
+            LIVE INTERVIEW CHAMBER · VOICE ASSESSMENT
           </span>
           <span style={{ fontSize: 12, color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }}>
             SESSION: {sessionId.slice(0, 16)}...

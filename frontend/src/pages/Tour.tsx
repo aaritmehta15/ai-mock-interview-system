@@ -31,7 +31,7 @@ const TOUR_STEPS: TourStep[] = [
     badgeColor: 'status-pill-cyan',
     headline: 'No Cognitive Overload. One Intentional Step at a Time.',
     description:
-      'Unlike generic hackathon apps that dump resumes, questions, audio controls, and scores onto a single chaotic screen, Apex guides you through a calibrated Silicon Valley pipeline. You explore your track, synthesize your blueprint, audition your persona, and enter a dedicated voice chamber.',
+      'Unlike generic hackathon apps that dump resumes, questions, audio controls, and scores onto a single chaotic screen, AI Mock Interviewer guides you through a calibrated Silicon Valley pipeline. You explore your track, synthesize your blueprint, audition your persona, and enter a dedicated voice chamber.',
     icon: Compass,
     illustration: {
       tag: '5-STAGE PROGRESSIVE PIPELINE',
@@ -157,7 +157,7 @@ export default function Tour() {
                 color: '#818cf8',
               }}
             >
-              APEX ORIENTATION
+              SYSTEM TOUR
             </span>
             <span style={{ color: '#475569' }}>/</span>
             <span style={{ fontSize: 13, color: '#94a3b8' }}>

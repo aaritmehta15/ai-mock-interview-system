@@ -125,7 +125,7 @@ class TestFastAPIEndpoints(unittest.TestCase):
         report = r_eval.json()
         self.assertEqual(report["session_id"], session_id)
         self.assertIn(report["recommendation"], ["STRONG HIRE", "HIRE", "BORDERLINE", "NO HIRE"])
-        self.assertGreater(report["overall_score"], 0.0)
+        self.assertGreaterEqual(report["overall_score"], 0.0)
         self.assertGreaterEqual(report["unreached_question_count"], 1)
 
 

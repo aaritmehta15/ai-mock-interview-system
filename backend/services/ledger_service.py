@@ -283,13 +283,12 @@ def list_sessions(limit: int = 50, offset: int = 0) -> List[dict]:
 
 
 def delete_session(session_id: str) -> bool:
-    """Delete a session, its turns, and its blueprint."""
+    """Delete a session and its turns from SQLite ledger."""
     conn = _get_connection()
     try:
         with conn:
             conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM turns WHERE session_id = ?", (session_id,))
-            conn.execute("DELETE FROM blueprints WHERE key = ?", (session_id,))
         return True
     except Exception as e:
         logger.error("[ledger] Failed to delete session %s: %s", session_id, e)

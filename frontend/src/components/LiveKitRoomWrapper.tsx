@@ -217,10 +217,10 @@ function RoomControls({
             color: agentSpeaking ? '#a5b4fc' : isSpeaking ? '#fda4af' : 'var(--text-2, #a0aec0)',
           }}>
             {agentSpeaking
-              ? `🎙️ ${persona?.name?.toUpperCase() || 'APEX INTERVIEWER'} IS SPEAKING`
+              ? `🎙️ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS SPEAKING`
               : isSpeaking
               ? '🗣️ CANDIDATE SPEAKING'
-              : `👂 ${persona?.name?.toUpperCase() || 'APEX INTERVIEWER'} IS LISTENING`}
+              : `👂 ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS LISTENING`}
           </span>
           <p style={{ fontSize: 13, color: 'var(--text-3, #7a8290)', margin: '8px 0 0' }}>
             {persona

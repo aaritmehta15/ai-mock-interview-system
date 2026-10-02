@@ -90,15 +90,13 @@ export default function LatencyTelemetry({
           }}
         />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: '#94a3b8' }}>RTT:</span>
-          <span style={{ fontWeight: 700, color: '#f8fafc' }}>{stats.roundtripMs}ms</span>
-          <span style={{ color: 'rgba(255, 255, 255, 0.2)' }}>|</span>
-          <span style={{ color: '#94a3b8' }}>TTFT:</span>
-          <span style={{ fontWeight: 700, color: '#38bdf8' }}>{stats.ttftMs}ms</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontWeight: 600, color: '#e2e8f0', fontSize: 11 }}>
+            Diagnostics
+          </span>
         </div>
 
-        {expanded ? <ChevronUp size={14} color="#94a3b8" /> : <ChevronDown size={14} color="#94a3b8" />}
+        {expanded ? <ChevronUp size={13} color="#94a3b8" /> : <ChevronDown size={13} color="#94a3b8" />}
       </motion.button>
 
       {/* Expanded Diagnostics Drawer */}

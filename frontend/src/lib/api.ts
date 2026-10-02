@@ -103,6 +103,8 @@ export interface QuestionEvaluation {
 
 export interface EvaluationReport {
   session_id: string;
+  company?: string;
+  role?: string;
   overall_score?: number;
   total_score?: number;
   recommendation: 'STRONG HIRE' | 'HIRE' | 'LEAN HIRE' | 'NO HIRE' | string;
