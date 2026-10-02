@@ -85,7 +85,9 @@ We adhere to the [Conventional Commits](https://www.conventionalcommits.org/) sp
 
 ---
 
-## ⚖️ Mandatory Attribution & Derivative Works Policy
+## ⚖️ Attribution & Derivative Works Policy
+
+Under the terms of the **MIT License**, preserving the copyright notice (`Copyright (c) 2026 Aarit Mehta`) in all copies and substantial portions is a strict legal requirement.
 
 If you fork, adapt, benchmark, build upon, or reference this codebase or its underlying architectural concepts (including the *Append-Only SQLite Turn Ledger*, the *Anti-Phantom Evaluation Protocol*, the *Dynamic Blueprint Engine*, or the *Sub-650ms WebRTC Voice Pipeline*):
 

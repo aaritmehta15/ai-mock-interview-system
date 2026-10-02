@@ -347,16 +347,18 @@ Apex Interview AI was intentionally engineered from day one to operate sustainab
 
 ---
 
-## 🛡️ License & Mandatory Attribution
+## 🛡️ License & Attribution
 
 This project is licensed under the **MIT License** — see [`LICENSE`](LICENSE) for complete details.
 
-### ⚖️ Strict Attribution Requirement
+### ⚖️ Attribution & Citation Policy
+Under the terms of the **MIT License**, preserving the original copyright notice (`Copyright (c) 2026 Aarit Mehta`) in all copies and substantial portions is a **strict legal requirement**.
+
 If you fork, adapt, reference, or build upon this codebase, its architecture, or its concepts (including the *Append-Only SQLite Turn Ledger*, the *Anti-Phantom Evaluation Protocol*, the *Dynamic Blueprint Engine*, or the *Sub-650ms WebRTC Voice Pipeline*):
 1. **Mandatory Credit**: You **MUST** provide prominent, clear credit to **Aarit Mehta** as the original creator.
-2. **Repository Backlink**: You **MUST** include a direct, visible link back to this original repository:
+2. **Repository Backlink**: You **MUST** include a direct, visible link back to this original repository:  
    `https://github.com/aaritmehta15/ai-mock-interview-system`
-3. **Academic & Portfolio Integrity**: You may **NOT** claim this architecture or project as your own original work in academic evaluations, hackathons, portfolio submissions, or commercial products without explicit credit.
+3. **Academic & Portfolio Integrity**: You may **NOT** claim this architecture or project as your own original work in academic evaluations, hackathons, portfolio submissions, or commercial products without explicit attribution.
 
 ```bibtex
 @software{mehta2026apexinterview,
