@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -39,12 +39,18 @@ function RoomControls({
   useEffect(() => {
     if (!localParticipant) return;
     const interval = setInterval(() => {
-      setIsSpeaking(localParticipant.isSpeaking);
-      const agent = remoteParticipants.find(p => p.identity.includes('agent') || p.identity.includes('interviewer') || true);
+      const candSpeaking = !!localParticipant.isSpeaking;
+      setIsSpeaking(prev => (prev !== candSpeaking ? candSpeaking : prev));
+
+      const agent = remoteParticipants.find(
+        p => p.isAgent || p.identity.startsWith('agent') || p.identity.includes('agent') || p.identity.includes('interviewer')
+      ) || remoteParticipants[0];
+
       if (agent) {
-        setAgentSpeaking(agent.isSpeaking);
+        const agSpeaking = !!agent.isSpeaking;
+        setAgentSpeaking(prev => (prev !== agSpeaking ? agSpeaking : prev));
       }
-    }, 150);
+    }, 200);
     return () => clearInterval(interval);
   }, [localParticipant, remoteParticipants]);
 
@@ -297,7 +303,7 @@ function RoomControls({
   );
 }
 
-export default function LiveKitRoomWrapper({
+function LiveKitRoomWrapperComponent({
   token,
   serverUrl,
   onLeave,
@@ -320,3 +326,6 @@ export default function LiveKitRoomWrapper({
     </LiveKitRoom>
   );
 }
+
+const LiveKitRoomWrapper = React.memo(LiveKitRoomWrapperComponent);
+export default LiveKitRoomWrapper;

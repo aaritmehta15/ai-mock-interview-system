@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -124,7 +124,7 @@ export default function Interview() {
     }
   };
 
-  const handleEndInterview = async () => {
+  const handleEndInterview = useCallback(async () => {
     setLiveKitToken(null);
     setIsEvaluating(true);
     const targetSessionId = activeSessionIdRef.current || sessionId;
@@ -139,7 +139,7 @@ export default function Interview() {
     } finally {
       setIsEvaluating(false);
     }
-  };
+  }, [sessionId, setLatestReport, navigate]);
 
   if (isEvaluating) {
     return (
@@ -163,6 +163,17 @@ export default function Interview() {
       </div>
     );
   }
+
+  const wrapperPersona = useMemo(() => ({
+    ...persona,
+    archetype: persona.difficulty,
+    badge_label: persona.title,
+    tagline: persona.signature_phrase,
+    pause_tolerance_seconds: persona.pause_tolerance,
+    thinking_pause_seconds: persona.thinking_delay,
+    probe_style: 'Calibrated Socratic Assessment',
+    traits: [persona.signature_phrase],
+  }), [persona]);
 
   return (
     <div style={{ maxWidth: 1040, margin: '0 auto', padding: '36px 24px' }}>
@@ -231,16 +242,7 @@ export default function Interview() {
             serverUrl={serverUrl}
             sessionTitle={`${targetCompany} ${seniority} Voice Interview`}
             onLeave={handleEndInterview}
-            persona={{
-              ...persona,
-              archetype: persona.difficulty,
-              badge_label: persona.title,
-              tagline: persona.signature_phrase,
-              pause_tolerance_seconds: persona.pause_tolerance,
-              thinking_pause_seconds: persona.thinking_delay,
-              probe_style: 'Calibrated Socratic Assessment',
-              traits: [persona.signature_phrase],
-            }}
+            persona={wrapperPersona}
           />
         </div>
       ) : (

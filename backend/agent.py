@@ -20,6 +20,19 @@ from __future__ import annotations
 # ── Pre-warm imports that block the event loop on first use ────────────────────
 # These imports trigger slow native library loading. Doing them at module level
 # means the cost is paid at startup, not during a live audio session.
+import sys
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 import ssl as _ssl_prewarm
 try:
     _ssl_prewarm.create_default_context()  # forces SSL context construction once
@@ -28,6 +41,7 @@ except Exception:
 
 import anyio  # noqa: F401 — forces anyio._core._sockets import before the loop runs
 try:
+    import anyio._core._synchronization  # noqa: F401
     import numpy.fft  # noqa: F401 — forces numpy FFT native extension load
 except ImportError:
     pass
@@ -38,7 +52,6 @@ import json
 import logging
 import os
 import re
-import sys
 from typing import Optional
 from dotenv import load_dotenv
 import groq
@@ -241,7 +254,7 @@ async def entrypoint(ctx: JobContext):
         custom_vocabulary=vocab[:50],
     )
 
-    logger.info("[agent] Initializing Gemini Multimodal Live API (model=gemini-2.5-flash-native-audio-preview-12-2025, voice=%s, language=en-US)...", persona.voice_model)
+    logger.info("[agent] Initializing Gemini Multimodal Live API (model=gemini-2.5-flash-native-audio-preview-12-2025, voice=%s, language=en-US, zero-thinking budget)...", persona.voice_model)
 
     model = realtime.RealtimeModel(
         api_key=gemini_key,
@@ -250,13 +263,16 @@ async def entrypoint(ctx: JobContext):
         instructions=instructions_with_greeting,
         language="en-US",
         input_audio_transcription=input_audio_transcription,
+        thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
     )
     agent = Agent(instructions=instructions_with_greeting)
     session = AgentSession(
         llm=model,
-        # 0.8s minimum gives candidates time to pause and structure complex technical responses without being interrupted
-        min_endpointing_delay=0.8,
-        max_endpointing_delay=2.5,
+        # Calibrated low-latency turn endpointing:
+        # 0.45s minimum gives candidate comfortable speech pauses without mid-word cuts,
+        # 1.0s maximum eliminates the 2.5s dead silence lag so replies feel immediate & natural
+        min_endpointing_delay=0.45,
+        max_endpointing_delay=1.0,
     )
     logger.info("[agent] Gemini Multimodal Live model ready.")
 
@@ -311,12 +327,12 @@ async def entrypoint(ctx: JobContext):
     logger.info("[agent] Triggering autonomous opening greeting as %s (%s at %s)...", persona.name, calibrated_role_title, company_name)
     try:
         handle = session.generate_reply(
-            user_input="Session started. Begin the interview with your opening greeting now.",
+            instructions=f'Spoken opening greeting: Introduce yourself as {persona.name}, {persona.title} at {company_name}, welcome the candidate to the {calibrated_role_title} interview, and invite them to introduce themselves.',
         )
-        await asyncio.wait_for(handle, timeout=12.0)
+        await asyncio.wait_for(handle, timeout=8.0)
         logger.info("[agent] Autonomous opening greeting delivered successfully.")
     except asyncio.TimeoutError:
-        logger.warning("[agent] Opening greeting timed out after 12s; continuing to listen for candidate audio.")
+        logger.warning("[agent] Opening greeting timed out after 8s; continuing to listen for candidate audio.")
     except Exception as e:
         logger.error("[agent] generate_reply greeting failed: %s", e)
 
@@ -348,8 +364,10 @@ def _prewarm(proc):
     try:
         import numpy.fft  # noqa: F401
         import anyio  # noqa: F401
+        import anyio._core._synchronization  # noqa: F401
         import ssl
         ssl.create_default_context()
+        from google.genai import Client as _GenAIClient  # noqa: F401
         logger.info("[agent] Pre-warm complete.")
     except Exception as e:
         logger.warning("[agent] Pre-warm partial failure (non-fatal): %s", e)
