@@ -187,6 +187,13 @@ async def create_blueprint_endpoint(req: BlueprintRequest):
         save_blueprint(bp.blueprint_id, bp)
         if req.session_id:
             save_blueprint(req.session_id, bp)
+            ledger_service.upsert_session(
+                session_id=req.session_id,
+                company=req.company,
+                role=req.role,
+                seniority=req.seniority,
+                persona_id=req.persona_id or "alex",
+            )
         return bp
     except Exception as e:
         logger.error("[api] Blueprint generation failed: %s", e)
@@ -194,6 +201,13 @@ async def create_blueprint_endpoint(req: BlueprintRequest):
         save_blueprint(fallback.blueprint_id, fallback)
         if req.session_id:
             save_blueprint(req.session_id, fallback)
+            ledger_service.upsert_session(
+                session_id=req.session_id,
+                company=req.company,
+                role=req.role,
+                seniority=req.seniority,
+                persona_id=req.persona_id or "alex",
+            )
         return fallback
 
 
@@ -226,6 +240,13 @@ async def upload_resume_and_create_blueprint(
         save_blueprint(bp.blueprint_id, bp)
         if session_id:
             save_blueprint(session_id, bp)
+            ledger_service.upsert_session(
+                session_id=session_id,
+                company=company,
+                role=role,
+                seniority=seniority,
+                persona_id=persona_id,
+            )
         return bp
     except Exception as e:
         logger.error("[api] PDF resume processing failed: %s", e)
@@ -233,6 +254,13 @@ async def upload_resume_and_create_blueprint(
         save_blueprint(fallback.blueprint_id, fallback)
         if session_id:
             save_blueprint(session_id, fallback)
+            ledger_service.upsert_session(
+                session_id=session_id,
+                company=company,
+                role=role,
+                seniority=seniority,
+                persona_id=persona_id,
+            )
         return fallback
 
 
@@ -294,6 +322,14 @@ async def generate_token_endpoint(req: TokenRequest):
     else:
         fallback_bp = build_fallback_blueprint(resolved_company, resolved_role, resolved_seniority)
         save_blueprint(req.room_name, fallback_bp)
+
+    ledger_service.upsert_session(
+        session_id=req.room_name,
+        company=resolved_company,
+        role=resolved_role,
+        seniority=resolved_seniority,
+        persona_id=req.persona_id or "alex",
+    )
 
     token = (
         livekit_api.AccessToken(api_key, api_secret)
@@ -375,3 +411,71 @@ async def record_turn_endpoint(req: RecordTurnRequest):
         confidence=req.confidence,
     )
     return turn
+
+
+# ─── Session History Endpoints ───────────────────────────────────────────────
+
+@app.get(
+    "/api/history",
+    summary="List all historical interview sessions and summaries",
+    tags=["History"],
+)
+async def list_history_endpoint(limit: int = 50, offset: int = 0):
+    """Returns chronologically indexed interview sessions for the candidate's dashboard."""
+    sessions = ledger_service.list_sessions(limit=limit, offset=offset)
+    return {
+        "total": len(sessions),
+        "sessions": sessions,
+    }
+
+
+@app.get(
+    "/api/history/{session_id}",
+    summary="Retrieve full session detail including blueprint, turns, and evaluation report",
+    tags=["History"],
+)
+async def get_history_detail_endpoint(session_id: str):
+    """Returns complete session dossier, blueprint, turns, and audit hash."""
+    session_data = ledger_service.get_session(session_id)
+    if not session_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found in history ledger.",
+        )
+    blueprint = get_blueprint(session_id)
+    turns = ledger_service.get_session_turns(session_id)
+    session_hash = ledger_service.compute_session_hash(session_id)
+
+    # Parse report if available
+    report = None
+    if session_data.get("report_json"):
+        try:
+            report = json.loads(session_data["report_json"])
+        except Exception:
+            report = None
+
+    return {
+        "session": session_data,
+        "blueprint": blueprint,
+        "report": report,
+        "turns_count": len(turns),
+        "session_hash": session_hash,
+        "turns": turns,
+    }
+
+
+@app.delete(
+    "/api/history/{session_id}",
+    summary="Delete a session and its associated turns from ledger",
+    tags=["History"],
+)
+async def delete_history_session_endpoint(session_id: str):
+    """Deletes a session from the history ledger."""
+    success = ledger_service.delete_session(session_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete session {session_id}.",
+        )
+    return {"status": "deleted", "session_id": session_id}
+

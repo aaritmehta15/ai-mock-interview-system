@@ -145,6 +145,33 @@ export interface LedgerAuditResponse {
   turns: TurnEvent[];
 }
 
+export interface SessionSummary {
+  session_id: string;
+  company: string;
+  role: string;
+  seniority: string;
+  persona_id: string;
+  overall_score: number | null;
+  recommendation: string | null;
+  turn_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionHistoryResponse {
+  total: number;
+  sessions: SessionSummary[];
+}
+
+export interface SessionHistoryDetail {
+  session: SessionSummary;
+  blueprint: InterviewBlueprint | null;
+  report: EvaluationReport | null;
+  turns_count: number;
+  session_hash: string;
+  turns: TurnEvent[];
+}
+
 // ── API Methods ─────────────────────────────────────────────────────────────
 export const health = () => api.get('/health').then(r => r.data);
 
@@ -209,5 +236,14 @@ export const recordTurn = (payload: {
   question_index?: number;
   confidence?: number;
 }): Promise<TurnEvent> => api.post('/api/ledger/turn', payload).then(r => r.data);
+
+export const getHistory = (limit: number = 50, offset: number = 0): Promise<SessionHistoryResponse> =>
+  api.get('/api/history', { params: { limit, offset } }).then(r => r.data);
+
+export const getHistoryDetail = (sessionId: string): Promise<SessionHistoryDetail> =>
+  api.get(`/api/history/${sessionId}`).then(r => r.data);
+
+export const deleteHistorySession = (sessionId: string): Promise<{ status: string; session_id: string }> =>
+  api.delete(`/api/history/${sessionId}`).then(r => r.data);
 
 export default api;

@@ -143,13 +143,15 @@ def _fallback_heuristic_assertion_eval(
     question: BlueprintQuestion, candidate_speech: str
 ) -> List[AssertionResult]:
     """Heuristic fallback assertion evaluator if external AI API is unavailable."""
+    import re
     speech_lower = candidate_speech.lower()
     results = []
     for a in question.assertions:
-        # Check if key words from assertion description appear in speech
-        keywords = [w.lower() for w in a.description.split() if len(w) > 4]
+        # Extract clean alphanumeric tokens (length >= 3) from assertion name and description
+        keywords = set(re.findall(r'[a-zA-Z]{3,}', f"{a.name} {a.description}".lower()))
         match_count = sum(1 for kw in keywords if kw in speech_lower)
-        passed = (match_count >= max(1, len(keywords) // 2))
+        threshold = max(1, min(2, len(keywords) // 3))
+        passed = (match_count >= threshold)
         results.append(AssertionResult(
             assertion_name=a.name,
             passed=passed,
@@ -159,16 +161,29 @@ def _fallback_heuristic_assertion_eval(
     return results
 
 
-async def evaluate_session(session_id: str) -> EvaluationReport:
+async def evaluate_session(session_id: str, force_reevaluate: bool = False) -> EvaluationReport:
     """
     Main evaluation pipeline:
     1. Retrieves chronological turns from SQLite Turn Ledger.
-    2. Identifies asked questions vs unreached questions.
-    3. Evaluates reached questions against Binary Assertions.
-    4. Computes deterministic competency and overall scores.
-    5. Formulates Staff Hiring Committee recommendation.
-    6. Attaches SHA-256 session integrity digest.
+    2. Checks if previously evaluated report is cached in SQLite session ledger.
+    3. Identifies asked questions vs unreached questions.
+    4. Evaluates reached questions against Binary Assertions.
+    5. Computes deterministic competency and overall scores.
+    6. Formulates Staff Hiring Committee recommendation.
+    7. Attaches SHA-256 session integrity digest.
+    8. Persists report into SQLite session ledger for instant retrieval in History.
     """
+    # 0. Check cache first for instant retrieval and deterministic reproducibility
+    if not force_reevaluate:
+        meta = ledger_service.get_session(session_id)
+        if meta and meta.get("report_json"):
+            try:
+                cached_data = json.loads(meta["report_json"])
+                logger.info("[evaluator] Returning cached EvaluationReport for session %s", session_id)
+                return EvaluationReport(**cached_data)
+            except Exception as e:
+                logger.warning("[evaluator] Failed to parse cached report for %s: %s", session_id, e)
+
     turns = ledger_service.get_session_turns(session_id)
     blueprint = get_blueprint(session_id) or build_fallback_blueprint("Technology Firm", "Software Engineer")
     
@@ -304,7 +319,20 @@ async def evaluate_session(session_id: str) -> EvaluationReport:
         verified_turn_count=len(verified_turns),
         created_at=datetime.now(timezone.utc).isoformat()
     )
-    
+
+    # Persist evaluation into SQLite session ledger
+    try:
+        report_json = report.model_dump_json()
+        rec_str = recommendation.value if hasattr(recommendation, "value") else str(recommendation)
+        ledger_service.upsert_session(
+            session_id=session_id,
+            overall_score=overall_score,
+            recommendation=rec_str,
+            report_json=report_json,
+        )
+    except Exception as e:
+        logger.warning("[evaluator] Failed to cache report in sessions index for %s: %s", session_id, e)
+
     logger.info("[evaluator] Generated Dossier for session %s: Score=%.1f, Rec=%s, Unreached=%d",
                 session_id, overall_score, recommendation.value, unreached_count)
     return report

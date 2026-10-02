@@ -44,7 +44,7 @@ def _get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Initialize the SQLite append-only turns table."""
+    """Initialize the SQLite append-only turns table and sessions index table."""
     conn = _get_connection()
     try:
         with conn:
@@ -63,9 +63,54 @@ def init_db() -> None:
                 );
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id, timestamp);")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    company TEXT NOT NULL DEFAULT 'Technology Firm',
+                    role TEXT NOT NULL DEFAULT 'Software Engineer',
+                    seniority TEXT NOT NULL DEFAULT 'Staff',
+                    persona_id TEXT NOT NULL DEFAULT 'alex',
+                    overall_score REAL,
+                    recommendation TEXT,
+                    report_json TEXT,
+                    turn_count INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at DESC);")
+
+            # Auto-backfill existing sessions from turns that are not yet in sessions table
+            existing_turns_sessions = conn.execute("""
+                SELECT session_id, count(*) as count, min(timestamp) as min_ts, max(timestamp) as max_ts
+                FROM turns
+                GROUP BY session_id
+            """).fetchall()
+
+            for row in existing_turns_sessions:
+                sid = row["session_id"]
+                tcount = row["count"]
+                min_ts = row["min_ts"] or datetime.now(timezone.utc).isoformat()
+                max_ts = row["max_ts"] or min_ts
+                conn.execute("""
+                    INSERT OR IGNORE INTO sessions (
+                        session_id, company, role, seniority, persona_id,
+                        turn_count, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    sid,
+                    "Technology Firm",
+                    "Software Engineer",
+                    "Staff",
+                    "alex",
+                    tcount,
+                    min_ts,
+                    max_ts
+                ))
     finally:
         conn.close()
-    logger.info("[ledger] Initialized SQLite Turn Ledger at %s", _DB_PATH)
+    logger.info("[ledger] Initialized SQLite Turn Ledger & Sessions table at %s", _DB_PATH)
 
 
 # Initialize DB on module load
@@ -134,12 +179,123 @@ def record_turn(
                 turn.timestamp,
                 1 if turn.verified else 0,
             ))
+            # Keep turn_count and updated_at fresh in sessions index
+            conn.execute("""
+                UPDATE sessions
+                SET turn_count = (SELECT count(*) FROM turns WHERE session_id = ?),
+                    updated_at = ?
+                WHERE session_id = ?
+            """, (session_id, ts, session_id))
     finally:
         conn.close()
 
     logger.debug("[ledger] Recorded turn %s in session %s (Speaker: %s, Words: %d, Verified: %s)",
                  turn.turn_id, session_id, turn.speaker.value, word_count, verified)
     return turn
+
+
+def upsert_session(
+    session_id: str,
+    company: Optional[str] = None,
+    role: Optional[str] = None,
+    seniority: Optional[str] = None,
+    persona_id: Optional[str] = None,
+    overall_score: Optional[float] = None,
+    recommendation: Optional[str] = None,
+    report_json: Optional[str] = None,
+    turn_count: Optional[int] = None,
+) -> dict:
+    """Insert or update a session record in the sessions index table."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _get_connection()
+    try:
+        with conn:
+            existing = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+            if existing:
+                new_company = company or existing["company"]
+                new_role = role or existing["role"]
+                new_seniority = seniority or existing["seniority"]
+                new_persona = persona_id or existing["persona_id"]
+                new_score = overall_score if overall_score is not None else existing["overall_score"]
+                new_rec = recommendation if recommendation is not None else existing["recommendation"]
+                new_report = report_json if report_json is not None else existing["report_json"]
+                new_turn_count = turn_count if turn_count is not None else existing["turn_count"]
+
+                conn.execute("""
+                    UPDATE sessions SET
+                        company = ?, role = ?, seniority = ?, persona_id = ?,
+                        overall_score = ?, recommendation = ?, report_json = ?,
+                        turn_count = ?, updated_at = ?
+                    WHERE session_id = ?
+                """, (
+                    new_company, new_role, new_seniority, new_persona,
+                    new_score, new_rec, new_report,
+                    new_turn_count, now, session_id
+                ))
+            else:
+                conn.execute("""
+                    INSERT INTO sessions (
+                        session_id, company, role, seniority, persona_id,
+                        overall_score, recommendation, report_json,
+                        turn_count, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    session_id,
+                    company or "Technology Firm",
+                    role or "Software Engineer",
+                    seniority or "Staff",
+                    persona_id or "alex",
+                    overall_score,
+                    recommendation,
+                    report_json,
+                    turn_count or 0,
+                    now,
+                    now
+                ))
+    finally:
+        conn.close()
+    return get_session(session_id) or {}
+
+
+def get_session(session_id: str) -> Optional[dict]:
+    """Retrieve session record by session ID."""
+    conn = _get_connection()
+    try:
+        row = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+        if not row:
+            return None
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def list_sessions(limit: int = 50, offset: int = 0) -> List[dict]:
+    """List chronological sessions sorted by created_at DESC."""
+    conn = _get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM sessions ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def delete_session(session_id: str) -> bool:
+    """Delete a session, its turns, and its blueprint."""
+    conn = _get_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM turns WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM blueprints WHERE key = ?", (session_id,))
+        return True
+    except Exception as e:
+        logger.error("[ledger] Failed to delete session %s: %s", session_id, e)
+        return False
+    finally:
+        conn.close()
 
 
 def get_session_turns(session_id: str) -> List[TurnEvent]:
@@ -218,6 +374,10 @@ class LedgerService:
     get_asked_question_indices = staticmethod(get_asked_question_indices)
     compute_session_hash = staticmethod(compute_session_hash)
     init_db = staticmethod(init_db)
+    upsert_session = staticmethod(upsert_session)
+    get_session = staticmethod(get_session)
+    list_sessions = staticmethod(list_sessions)
+    delete_session = staticmethod(delete_session)
 
 
 ledger_service = LedgerService()
