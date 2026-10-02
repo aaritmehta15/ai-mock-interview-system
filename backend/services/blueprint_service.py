@@ -150,6 +150,45 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         return ""
 
 
+def detect_company_archetype(company_name: str) -> str:
+    """
+    Classifies company into one of 4 major hiring archetypes:
+    - IT_SERVICES: Global IT consulting & service firms (TCS, Infosys, Wipro, Accenture, Cognizant, etc.)
+    - FINTECH: Banking, payment infrastructure, high-integrity financial platforms (Stripe, Goldman Sachs, Bloomberg, etc.)
+    - BIG_TECH: Hyperscalers & product giants (Google, Meta, Amazon, Microsoft, Apple, Netflix, Uber, etc.)
+    - STARTUP_PRODUCT: High-velocity startups & product scale-ups (default fallback)
+    """
+    comp = (company_name or "").strip().lower()
+
+    it_services_names = [
+        "tcs", "tata consultancy", "infosys", "wipro", "accenture", "cognizant",
+        "capgemini", "hcl", "tech mahindra", "l&t", "lti", "mindtree", "mphasis",
+        "hexaware", "persistent", "birlasoft", "deloitte", "kpmg", "pwc", "ey",
+        "it services", "consultancy", "services", "tata"
+    ]
+    if any(k in comp for k in it_services_names):
+        return "IT_SERVICES"
+
+    fintech_names = [
+        "stripe", "goldman", "bloomberg", "morgan stanley", "jpmorgan", "chase",
+        "paypal", "visa", "mastercard", "plaid", "square", "block", "robinhood",
+        "coinbase", "citadel", "two sigma", "jane street", "capital one", "fintech",
+        "bank", "fidelity"
+    ]
+    if any(k in comp for k in fintech_names):
+        return "FINTECH"
+
+    big_tech_names = [
+        "google", "meta", "facebook", "amazon", "aws", "microsoft", "apple",
+        "netflix", "uber", "airbnb", "databricks", "snowflake", "bytedance",
+        "tiktok", "salesforce", "oracle", "adobe", "nvidia", "intel"
+    ]
+    if any(k in comp for k in big_tech_names):
+        return "BIG_TECH"
+
+    return "STARTUP_PRODUCT"
+
+
 async def generate_blueprint(
     company: str,
     role: str,
@@ -162,15 +201,15 @@ async def generate_blueprint(
 ) -> InterviewBlueprint:
     """
     Synthesizes an immutable, calibrated InterviewBlueprint grounded on candidate profile,
-    resume, target JD, primary programming language, and interview practice focus.
-    Produces questions with verifiable BinaryAssertion sets and pre-boosted technical keywords.
+    resume, target JD, primary programming language, company hiring archetype, and practice focus.
+    Produces realistic spoken questions with verifiable BinaryAssertion sets.
     """
-    clean_company = company.strip() or "Top-Tier Technology Firm"
+    clean_company = company.strip() or "Technology Firm"
     clean_role = role.strip() or "Software Engineer"
     clean_language = (primary_language or "Python").strip()
     clean_focus = (interview_focus or "Balanced Screening").strip()
     clean_spotlight = (spotlight_topic or "").strip()
-    
+
     if isinstance(seniority, SeniorityLevel):
         seniority_enum = seniority
     elif isinstance(seniority, str):
@@ -188,28 +227,101 @@ async def generate_blueprint(
     else:
         seniority_enum = SeniorityLevel.MID
 
-    resume_snippet = resume_text[:3000] if resume_text else "(No resume provided - calibrate to industry standard for role)"
+    resume_snippet = resume_text[:3200] if resume_text else "(No resume provided - calibrate to industry standard for role)"
     jd_snippet = jd_text[:2500] if jd_text else "(No explicit JD provided - use canonical standards for role)"
 
     has_resume = bool(resume_text and len(resume_text.strip()) > 30)
     is_student = seniority_enum == SeniorityLevel.STUDENT
 
+    # 1. Company Archetype Calibration
+    archetype = detect_company_archetype(clean_company)
+    if archetype == "IT_SERVICES":
+        archetype_instruction = f"""
+- TARGET COMPANY ARCHETYPE: GLOBAL IT SERVICES & ENTERPRISE CONSULTING ({clean_company})
+  The candidate is interviewing for a professional software engineering or consulting position at {clean_company}.
+  * CORE EVALUATION FOCUS:
+    - Language Foundations & OOPs: Solid grasp of Object-Oriented Programming (encapsulation, inheritance, polymorphism, abstraction) or idiomatic structures in {clean_language}.
+    - Relational Data & SQL: Practical database schema design, normalization, table joins, aggregation, and basic indexing.
+    - Code Quality & Clean Functions: Readability, standard naming conventions, modularity, and error handling.
+    - Software Development Lifecycle (SDLC): Agile/Scrum basics, unit testing, and client requirement comprehension.
+    - Project Ownership: Clear explanation of their academic, capstone, or past enterprise client project modules and data flow.
+  * WHAT TO STRICTLY AVOID:
+    - DO NOT ask about multi-region distributed Paxos/Raft consensus or multi-datacenter quorum fencing (unrealistic and irrelevant for this interview).
+    - DO NOT ask obscure LeetCode-hard mathematical trick riddles.
+    - DO NOT ask about kernel-level networking or specialized cloud hyper-scaler internals.
+"""
+    elif archetype == "FINTECH":
+        archetype_instruction = f"""
+- TARGET COMPANY ARCHETYPE: FINTECH & MISSION-CRITICAL FINANCIAL PLATFORMS ({clean_company})
+  The candidate is interviewing for a high-integrity financial systems team.
+  * CORE EVALUATION FOCUS:
+    - Transactional Integrity: ACID semantics, database transactions, idempotency keys, and reconciliation.
+    - Concurrency & Race Conditions: Thread safety, race condition prevention during balance updates, and optimistic vs pessimistic locking.
+    - Reliability & Auditability: Audit logs, zero data loss under network partitions or crashes, and defensive input validation.
+    - Numeric Precision: Floating-point hazards in monetary calculations and strict API contracts in {clean_language}.
+  * WHAT TO STRICTLY AVOID:
+    - Pure frontend aesthetic questions without data consistency considerations.
+    - Reckless "move fast and break things" trade-offs that sacrifice correctness.
+"""
+    elif archetype == "BIG_TECH":
+        archetype_instruction = f"""
+- TARGET COMPANY ARCHETYPE: BIG TECH & HYPERSCALE PLATFORMS ({clean_company})
+  The candidate is interviewing for a global technology leader known for extreme scale and high engineering standards.
+  * CORE EVALUATION FOCUS:
+    - Scalable Data Structures & Complexity: Strict Big-O time and space optimization, memory layout, and hash/tree lookup trade-offs in {clean_language}.
+    - Scale & Partitioning: Horizontal scaling, data sharding, multi-tier caching (Redis/Memcached), and resilient service boundaries.
+    - High-Availability Patterns: Circuit breakers, backpressure, rate limiting, and graceful degradation during partial outages.
+    - Problem Decomposition: Clear articulation of requirements, edge-case coverage, and trade-off justification.
+  * WHAT TO STRICTLY AVOID:
+    - Obscure language-specific trivia or memorization traps.
+    - Academic textbook definitions detached from real production scale.
+"""
+    else:
+        archetype_instruction = f"""
+- TARGET COMPANY ARCHETYPE: HIGH-VELOCITY PRODUCT COMPANY / STARTUP ({clean_company})
+  The candidate is interviewing for a fast-moving, high-ownership product engineering team.
+  * CORE EVALUATION FOCUS:
+    - Pragmatic Delivery: Clean end-to-end component design, building reliable MVPs, and practical API contracts in {clean_language}.
+    - Practical Architecture: Making sound architectural decisions without over-engineering (e.g. modular monolith vs microservices).
+    - Production Troubleshooting: Rapid bug diagnosis, structured logging, error handling, and test fixtures.
+    - Pragmatic Trade-offs: Balancing development velocity with technical debt management.
+  * WHAT TO STRICTLY AVOID:
+    - Over-engineered 20-node microservice setups for early-stage features.
+    - Academic trivia detached from real customer value.
+"""
+
+    # 2. Seniority Calibration Rubric
     if is_student:
         level_instruction = f"""
 - CANDIDATE SENIORITY CALIBRATION (STUDENT / INTERN / FRESHER):
   The candidate is an aspiring engineer / college student or recent graduate.
-  * DO NOT ask questions about managing multi-million-dollar distributed enterprise outages or 10-year legacy migrations.
   * FOCUS ON: Computer science fundamentals, algorithmic problem solving in {clean_language}, code modularity, curiosity, deep understanding of their academic/capstone projects, and how they isolate and debug bugs when code fails.
+  * DO NOT ask questions about managing multi-million-dollar distributed enterprise outages, 10-year legacy migrations, or cross-datacenter Paxos consensus.
+"""
+    elif seniority_enum == SeniorityLevel.JUNIOR:
+        level_instruction = f"""
+- CANDIDATE SENIORITY CALIBRATION (JUNIOR / SDE I):
+  The candidate is an entry-level engineer.
+  * FOCUS ON: Reliable feature implementation in {clean_language}, clean function contracts, defensive boundary validation (handling nulls, empty collections, type safety), basic database schema design, and unit testing mindset.
+  * DO NOT ask about multi-region distributed consensus or company-wide architectural strategy.
+"""
+    elif seniority_enum == SeniorityLevel.SENIOR:
+        level_instruction = f"""
+- CANDIDATE SENIORITY CALIBRATION (SENIOR / SDE III):
+  The candidate is a senior engineer expected to lead complex technical initiatives.
+  * FOCUS ON: Resilient architecture, concurrency, caching strategies, database query optimization (indexing, locking, N+1 queries), latency trade-offs, technical debt prioritization, and incident post-mortems in {clean_language}.
 """
     elif seniority_enum == SeniorityLevel.STAFF:
-        level_instruction = """
+        level_instruction = f"""
 - CANDIDATE SENIORITY CALIBRATION (STAFF / PRINCIPAL):
-  The candidate is targeting Staff+ leadership. Probe large-scale distributed systems, multi-region failure modes, non-functional trade-offs, and strategic technical debt remediation.
+  The candidate is targeting Staff+ leadership.
+  * FOCUS ON: Cross-service system boundaries, multi-region resiliency, blast-radius reduction, strategic technical debt remediation, zero-downtime migrations, and technology trade-off proofs.
 """
     else:
         level_instruction = f"""
-- CANDIDATE SENIORITY CALIBRATION ({seniority_enum.value.upper()}):
-  Probe practical implementation, concurrency, caching, data modeling, clean component contracts, and production maintainability in {clean_language}.
+- CANDIDATE SENIORITY CALIBRATION (MID-LEVEL / SDE II):
+  The candidate is a professional engineer with hands-on production experience.
+  * FOCUS ON: Practical implementation, concurrency, caching, data modeling, clean component contracts, and production maintainability in {clean_language}.
 """
 
     spotlight_instruction = ""
@@ -217,87 +329,77 @@ async def generate_blueprint(
         spotlight_instruction = f"""
 - CANDIDATE SPOTLIGHT REQUEST:
   The candidate specifically requested to spotlight/test: "{clean_spotlight}".
-  Question 4 or 5 MUST directly challenge the candidate on this project or concept.
+  Question 4 MUST directly challenge the candidate on this project, architecture, or concept.
 """
 
-    if has_resume:
-        dynamic_part2_instruction = f"""
-- ROUND 2 (Questions 4 to 6) — CANDIDATE EXPERIENCE & PROJECT DEEP DIVE:
-  Because the candidate provided a resume, Questions 4, 5, and 6 MUST be framed directly from their actual projects, claimed skills, and architecture experience in {clean_language}:
-  * Question 4 (id: "q_04"): Deep-dive into a prominent capstone, internship, or open-source project from their resume (or spotlight topic). Probe why they chose that architecture, how they handled data flow, and key trade-offs. (Category: "system_design", Competency: "Project Architecture & System Decisions").
-  * Question 5 (id: "q_05"): Hands-on technical verification of specific tools, libraries, or algorithms claimed on their resume using {clean_language}. Test real implementation depth and edge cases. (Category: "technical_dsa", Competency: "Hands-on Language & Framework Mastery").
-  * Question 6 (id: "q_06"): Engineering retrospective from their projects. Ask about a real technical compromise, bug, or scaling obstacle they tackled in their work, and how they would redesign it today. (Category: "behavioral", Competency: "Engineering Judgement & Project Retrospective").
-"""
-        round_labels = [
-            "Technical Foundations",
-            "Practical Problem Solving",
-            "Component / System Design",
-            "Project Architecture Deep-Dive",
-            "Hands-on Tooling & Skills Mastery",
-            "Engineering Retrospective & Judgement",
-        ]
-    else:
-        dynamic_part2_instruction = f"""
-- ROUND 2 (Questions 4 to 6) — TARGET DOMAIN & ARCHITECTURE CHALLENGES:
-  Because no resume was uploaded, formulate 3 high-impact questions tailored specifically to what is critical for a {seniority_enum.value} {clean_role} at {clean_company} using {clean_language}:
-  * Question 4 (id: "q_04"): Practical engineering challenge tailored to {clean_company}'s domain (e.g. data ingestion bottlenecks, caching, indexing, or real-time streaming). (Category: "system_design", Competency: "Target Domain Architecture Challenge").
-  * Question 5 (id: "q_05"): Low-level runtime internals, memory management, or concurrency in {clean_language} (e.g. thread safety, async event loop, connection pooling). (Category: "technical_dsa", Competency: "Language Internals & Resource Management").
-  * Question 6 (id: "q_06"): Real-world engineering trade-offs, technical debt prioritization, and incident remediation. (Category: "behavioral", Competency: "Strategic Engineering Trade-Offs & Judgement").
-"""
-        round_labels = [
-            "Technical Foundations",
-            "Practical Problem Solving",
-            "Component / System Design",
-            "Domain Engineering Challenge",
-            "Runtime Internals & Concurrency",
-            "Strategic Engineering Trade-Offs",
-        ]
+    round_labels = [
+        "Core Data Structures & Intuition",
+        "Defensive Logic & Edge Cases",
+        "Component & Architecture Design",
+        "Project Architecture Deep-Dive" if has_resume else "Domain Engineering Challenge",
+        "Troubleshooting & Debugging Flow",
+        "Engineering Judgement & Trade-Offs",
+    ]
 
-    prompt = f"""You are a Principal Engineering Director designing an official Technical Interview Blueprint for {clean_company} hiring a {seniority_enum.value} {clean_role}.
+    prompt = f"""You are a Senior Principal Interview Architect at {clean_company}, designing an official, authentic, and unbiased Technical Interview Blueprint for a {seniority_enum.value} {clean_role}.
 
-CANDIDATE CALIBRATION:
+CANDIDATE SIGNALS & CALIBRATION:
+- Target Company: {clean_company} (Archetype: {archetype})
+- Target Role: {clean_role}
+- Seniority Tier: {seniority_enum.value}
 - Primary Programming Language / Tech Stack: {clean_language}
 - Target Practice Focus: {clean_focus}
-- Seniority Tier: {seniority_enum.value}
-- Target Company: {clean_company}
-- Target Role: {clean_role}
+{archetype_instruction}
 {level_instruction}
 {spotlight_instruction}
 
-CANDIDATE RESUME HIGHLIGHTS:
+CANDIDATE RESUME / EXPERIENCE:
 ---
 {resume_snippet}
 ---
 
-JOB DESCRIPTION REQUIREMENTS:
+JOB DESCRIPTION CONTEXT:
 ---
 {jd_snippet}
 ---
 
 TASK:
-Design an immutable, evidence-bound Interview Blueprint containing exactly 6 calibrated technical and architectural questions:
-- ROUND 1 (Questions 1 to 3): Foundational Technical & Problem Solving in {clean_language}
-  * Question 1 (id: "q_01"): Core Technical Foundations & Algorithms / Data Access in {clean_language} (Category: "technical_dsa")
-  * Question 2 (id: "q_02"): Practical Implementation & Edge-Case Problem Solving (Category: "technical_dsa")
-  * Question 3 (id: "q_03"): Component or Architecture Design calibrated for a {seniority_enum.value} {clean_role} (Category: "system_design")
-{dynamic_part2_instruction}
+Design an authentic, non-biased Interview Blueprint containing exactly 6 calibrated spoken interview questions following this real-world 6-stage progression arc:
 
-CRITICAL REQUIREMENTS:
-1. "domain": Identify the primary engineering discipline (e.g. "Frontend Engineering", "Backend & Distributed Systems", "Machine Learning / AI", "Full-Stack Development", "Mobile Systems").
-2. "strategy_summary": A 1-2 sentence executive briefing explaining what this personalized interview tests and why for a {seniority_enum.value} candidate.
-3. "preparation_tips": Exactly 3 practical, actionable tips for the candidate to succeed in this session.
-4. "keywords": Extract 12-20 specific engineering tools, libraries, protocols, and language concepts (e.g. in {clean_language}).
-5. "questions": Exactly 6 questions (q_01, q_02, q_03, q_04, q_05, q_06).
-   For EACH of the 6 questions provide:
-   - "id": "q_01", "q_02", "q_03", "q_04", "q_05", "q_06"
-   - "text": Spoken question, concise and natural (<35 words).
-   - "competency": Specific evaluated competency.
-   - "category": "technical_dsa" | "system_design" | "behavioral"
-   - "assertions": Exactly 3 binary verification criteria (weights sum to 1.0):
-     - assertion 1: Core mechanism / fundamental concept (weight: 0.3)
-     - assertion 2: Edge case / asymptotic complexity (weight: 0.3)
-     - assertion 3: Operational failure mode / trade-off justification (weight: 0.4)
-   - "model_answer": A 2-sentence reference benchmark answer.
+1. Question 1 (id: "q_01"): Core Foundations & Data Structure Intuition in {clean_language}
+   - Evaluates: Data structure selection, algorithmic intuition, and time/space complexity.
+   - Category: "technical_dsa"
+   - Grounded in {clean_language} and calibrated to {clean_company}'s archetype ({archetype}).
+
+2. Question 2 (id: "q_02"): Practical Implementation, Defensive Logic & Boundary Cases
+   - Evaluates: Defensive validation (handling null/empty inputs, duplicates, off-by-one errors, concurrency or error recovery in {clean_language}).
+   - Category: "technical_dsa"
+
+3. Question 3 (id: "q_03"): Component or Architecture Design (Calibrated to Seniority & Company)
+   - Evaluates: Class/API modularity and data contracts (for student/junior) OR scalable component/system design (for mid/senior).
+   - Category: "system_design"
+
+4. Question 4 (id: "q_04"): Resume Project Deep-Dive OR Domain Engineering Challenge
+   - { "Deep-dive into an actual capstone, internship, or claimed project from the candidate resume (or spotlight topic), probing architectural decisions and data flow." if has_resume else f"Practical engineering challenge tailored to {clean_company}'s domain and business model." }
+   - Category: "system_design"
+
+5. Question 5 (id: "q_05"): Practical Debugging, Troubleshooting & Observability
+   - Evaluates: How the candidate investigates a realistic defect (e.g. slow query, memory leak, unhandled exception, race condition, or timeout in {clean_language}) using systematic hypothesis-driven debugging.
+   - Category: "technical_dsa"
+
+6. Question 6 (id: "q_06"): Engineering Trade-Offs, Retrospective & Judgement
+   - Evaluates: Real-world technical compromises, lessons learned from past coding or design mistakes, and how they prioritize fixes.
+   - Category: "behavioral"
+
+CRITICAL SPOKEN VOICE & QUALITY RULES:
+1. SPOKEN CONCISENESS: Each question text MUST be spoken aloud naturally over voice. Keep question text STRICTLY under 35 words. Never include bulleted lists or code blocks in the spoken question text.
+2. ZERO BIAS & REALISTIC PROBLEMS: Do NOT ask obscure language trivia, memorization gotchas, or trick math brainteasers. Every question must reflect a realistic scenario a developer faces on the job or in academic projects.
+3. OBJECTIVE ASSERTIONS: Provide exactly 3 binary verification assertions per question with weights summing to 1.0:
+   - Assertion 1 (Weight 0.3): Core concept and fundamental correctness.
+   - Assertion 2 (Weight 0.3): Edge case, complexity, or boundary condition handling.
+   - Assertion 3 (Weight 0.4): Real-world trade-off justification or failure mode analysis.
+4. MODEL ANSWER: Provide a concise 2-sentence benchmark answer demonstrating what a strong candidate response sounds like.
+5. STRATEGY SUMMARY & PREPARATION TIPS: Provide a 1-2 sentence executive briefing on the interview focus, plus exactly 3 actionable tips for candidate success.
 
 Return ONLY valid JSON matching this schema:
 {{
@@ -305,7 +407,7 @@ Return ONLY valid JSON matching this schema:
   "company": "{clean_company}",
   "role": "{clean_role}",
   "seniority": "{seniority_enum.value}",
-  "domain": "Detected discipline",
+  "domain": "Detected discipline (e.g. Enterprise Systems, Backend, Full-Stack, AI)",
   "primary_language": "{clean_language}",
   "interview_focus": "{clean_focus}",
   "spotlight_topic": "{clean_spotlight}",
@@ -359,7 +461,7 @@ Return ONLY valid JSON matching this schema:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.2,
-                max_tokens=2800,  # 6 full questions + 3 assertions each = ~1400 tokens
+                max_tokens=2800,
                 response_format={"type": "json_object"}
             )
             raw = res.choices[0].message.content
@@ -368,7 +470,7 @@ Return ONLY valid JSON matching this schema:
             parsed.setdefault("primary_language", clean_language)
             parsed.setdefault("interview_focus", clean_focus)
             parsed.setdefault("spotlight_topic", clean_spotlight)
-            parsed.setdefault("strategy_summary", f"Calibrated {seniority_enum.value} technical interview targeting {clean_role} at {clean_company} with focus on {clean_focus} in {clean_language}.")
+            parsed.setdefault("strategy_summary", f"Calibrated {seniority_enum.value} technical interview targeting {clean_role} at {clean_company} ({archetype}) with focus on {clean_focus} in {clean_language}.")
             parsed.setdefault("preparation_tips", [
                 f"State your assumptions early and walk through your logic before writing {clean_language} code.",
                 "Discuss algorithmic time and space complexity with concrete Big-O bounds.",
@@ -458,6 +560,108 @@ def build_fallback_blueprint(
     clean_role = role.strip() or "Software Engineer"
     clean_language = (primary_language or "Python").strip()
     is_student = seniority_enum == SeniorityLevel.STUDENT
+    archetype = detect_company_archetype(clean_company)
+
+    if archetype == "IT_SERVICES" and not (seniority_enum == SeniorityLevel.STAFF or seniority_enum == SeniorityLevel.SENIOR):
+        return InterviewBlueprint(
+            blueprint_id=f"bp_itservices_{re.sub(r'[^a-zA-Z0-9]', '_', clean_company.lower())}_{re.sub(r'[^a-zA-Z0-9]', '_', clean_role.lower())}",
+            company=clean_company,
+            role=clean_role,
+            seniority=seniority_enum,
+            domain="Enterprise Software & Consulting",
+            primary_language=clean_language,
+            interview_focus=interview_focus,
+            spotlight_topic=spotlight_topic,
+            strategy_summary=f"Calibrated enterprise software engineering interview for {clean_company}. Evaluates core {clean_language} OOPs principles, SQL relational data modeling, defensive input validation, and capstone project walkthrough.",
+            preparation_tips=[
+                f"Ground your answers in core OOPs and standard library conventions in {clean_language}.",
+                "Explain how you handle null values, empty inputs, and SQL relational table joins.",
+                "Walk through your capstone project structure and why you organized your code that way."
+            ],
+            keywords=["OOPs", clean_language, "Inheritance", "Polymorphism", "SQL", "Relational Database", "Debugging", "SDLC", "Agile", "Unit Testing"],
+            rounds=[
+                "Core Language & OOPs Principles",
+                "Defensive Logic & Input Validation",
+                "Relational Database & Component Design",
+                "Capstone Project Architecture",
+                "Systematic Debugging & Quality Assurance",
+                "Engineering Adaptability & Retrospective",
+            ],
+            questions=[
+                BlueprintQuestion(
+                    id="q_01",
+                    text=f"Welcome to your technical interview for {clean_company}. In {clean_language}, how do you apply core Object-Oriented principles like inheritance and encapsulation to write clean, reusable code?",
+                    competency="Object-Oriented Programming & Code Cleanliness",
+                    category=QuestionCategory.TECHNICAL_DSA,
+                    assertions=[
+                        BinaryAssertion(name="oops_principles", weight=0.3, description="Explains encapsulation, abstraction, inheritance, or polymorphism clearly"),
+                        BinaryAssertion(name="language_syntax", weight=0.3, description=f"Uses correct {clean_language} classes, access modifiers, or idiomatic patterns"),
+                        BinaryAssertion(name="reusability_tradeoff", weight=0.4, description="Explains composition over inheritance and avoiding fragile base classes")
+                    ],
+                    model_answer=f"Candidates demonstrate understanding of encapsulation to protect object state, and inheritance or composition to share behavior while maintaining modular boundaries in {clean_language}."
+                ),
+                BlueprintQuestion(
+                    id="q_02",
+                    text=f"When writing a backend function in {clean_language} that processes customer or employee records, how do you handle boundary edge cases like null pointers, empty collections, and duplicate IDs?",
+                    competency="Input Validation & Defensive Logic",
+                    category=QuestionCategory.TECHNICAL_DSA,
+                    assertions=[
+                        BinaryAssertion(name="null_safety", weight=0.3, description="Validates inputs for null, undefined, or empty sequences before operations"),
+                        BinaryAssertion(name="duplicate_detection", weight=0.3, description="Identifies duplicate keys using hash sets or database unique constraints"),
+                        BinaryAssertion(name="error_reporting", weight=0.4, description="Returns clear validation error messages or throws checked domain exceptions")
+                    ],
+                    model_answer="Strong candidates enforce defensive guard clauses at function entry, prevent null dereferences, and use set-based deduplication with appropriate logging."
+                ),
+                BlueprintQuestion(
+                    id="q_03",
+                    text="In an enterprise application, how do you design a normalized relational database schema with foreign keys to prevent duplicate records and maintain data integrity?",
+                    competency="Relational Schema Design & SQL",
+                    category=QuestionCategory.SYSTEM_DESIGN,
+                    assertions=[
+                        BinaryAssertion(name="normalization_rules", weight=0.3, description="Explains 1NF, 2NF, or 3NF principles to avoid data redundancy"),
+                        BinaryAssertion(name="key_relationships", weight=0.3, description="Defines primary keys, foreign keys, and referential integrity constraints"),
+                        BinaryAssertion(name="query_indexing", weight=0.4, description="Explains how indexing foreign keys improves join query performance")
+                    ],
+                    model_answer="Candidates demonstrate database normalization to eliminate duplicate data, establish foreign key constraints for referential integrity, and add B-Tree indexes on joined columns."
+                ),
+                BlueprintQuestion(
+                    id="q_04",
+                    text="Walk me through a prominent project or capstone from your experience. What were its main components, and why did you choose your database and framework?",
+                    competency="Project Architecture & Engineering Ownership",
+                    category=QuestionCategory.SYSTEM_DESIGN,
+                    assertions=[
+                        BinaryAssertion(name="project_overview", weight=0.3, description="Clearly outlines the business problem, user flow, and tech stack components"),
+                        BinaryAssertion(name="stack_justification", weight=0.3, description="Explains why specific frameworks or libraries were chosen over alternatives"),
+                        BinaryAssertion(name="component_integration", weight=0.4, description="Explains how frontend, API layer, and database communicate cleanly")
+                    ],
+                    model_answer="Candidates articulate genuine ownership by walking through their project architecture, explaining how components interact, and justifying their technology choices."
+                ),
+                BlueprintQuestion(
+                    id="q_05",
+                    text=f"When a function in your application throws an unexpected runtime exception or returns incorrect results, what systematic steps do you take to isolate and fix the root cause?",
+                    competency="Systematic Debugging & Issue Resolution",
+                    category=QuestionCategory.TECHNICAL_DSA,
+                    assertions=[
+                        BinaryAssertion(name="stack_trace_inspection", weight=0.3, description="Inspects the stack trace and application logs to pinpoint the failing line"),
+                        BinaryAssertion(name="reproduction_steps", weight=0.3, description="Reproduces the failure locally using minimal sample test inputs"),
+                        BinaryAssertion(name="unit_test_verification", weight=0.4, description="Writes an automated unit test to verify the fix and prevent regressions")
+                    ],
+                    model_answer="Effective candidates follow structured troubleshooting: reading the stack trace, reproducing with controlled test inputs, applying the fix, and adding a regression test."
+                ),
+                BlueprintQuestion(
+                    id="q_06",
+                    text="Looking back at your coding work, describe a technical challenge or mistake you made. How did you resolve it, and what did you learn about software quality?",
+                    competency="Engineering Adaptability & Growth Mindset",
+                    category=QuestionCategory.BEHAVIORAL,
+                    assertions=[
+                        BinaryAssertion(name="honest_challenge", weight=0.3, description="Candidly shares a real technical mistake, logic bug, or design challenge"),
+                        BinaryAssertion(name="problem_solving_action", weight=0.3, description="Describes proactive steps taken to resolve the issue with teammates or mentors"),
+                        BinaryAssertion(name="quality_takeaway", weight=0.4, description="Articulates concrete improvements in coding discipline and testing habits")
+                    ],
+                    model_answer="Candidates demonstrate humility and growth by candidly discussing a past coding mistake, how they worked through it, and the lasting engineering habits they developed."
+                )
+            ]
+        )
 
     if is_student:
         return InterviewBlueprint(

@@ -3,110 +3,82 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowRight,
-  Server,
-  Layers,
-  BrainCircuit,
-  Zap,
+  Sparkles,
   Building2,
   Award,
-  Check,
-  Sparkles,
-  Briefcase,
+  Layers,
+  Clock,
+  History as HistoryIcon,
+  ShieldCheck,
+  GraduationCap,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useInterview } from '../context/InterviewContext';
+import { getHistory, type SessionSummary } from '../lib/api';
 
-interface TrackOption {
+interface PresetTemplate {
   id: string;
+  badge: string;
+  badgeColor: string;
   title: string;
-  baseRole: string;
+  company: string;
   role: string;
-  tagline: string;
-  icon: React.ElementType;
+  seniority: string;
   accent: string;
-  coreConcepts: string[];
+  description: string;
+  icon: React.ElementType;
 }
 
-const TRACKS: TrackOption[] = [
+const PRESET_TEMPLATES: PresetTemplate[] = [
   {
-    id: 'dist-sys',
-    title: 'Distributed Systems & Cloud Infra',
-    baseRole: 'Distributed Systems Engineer',
-    role: 'Distributed Systems Engineer',
-    tagline: 'High-availability, consensus protocols, distributed transactions, and partition tolerance.',
-    icon: Server,
-    accent: '#38bdf8',
-    coreConcepts: ['Raft / Multi-Paxos', 'Quorum Fencing', 'Kafka Event Streaming', 'DynamoDB / Cassandra'],
-  },
-  {
-    id: 'ai-platform',
-    title: 'AI / ML Platform & LLM Infrastructure',
-    baseRole: 'AI Infrastructure Engineer',
-    role: 'AI Infrastructure Engineer',
-    tagline: 'High-throughput LLM inference, vLLM serving, vector search at scale, and KV cache optimization.',
-    icon: BrainCircuit,
-    accent: '#8b5cf6',
-    coreConcepts: ['vLLM PagedAttention', 'HNSW Vector Indexing', 'Quantization (FP8/INT4)', 'Triton Inference Server'],
+    id: 'campus',
+    badge: 'STUDENT / FRESHER',
+    badgeColor: '#10b981',
+    title: 'Campus Placement & IT Services',
+    company: 'TCS',
+    role: 'System Engineer',
+    seniority: 'Student / Intern',
+    accent: '#10b981',
+    description: 'Core OOPs principles, SQL queries, clean functions, and capstone project walkthrough.',
+    icon: GraduationCap,
   },
   {
     id: 'backend',
-    title: 'Backend & Scaled Microservices',
-    baseRole: 'Backend Engineer',
-    role: 'Backend Engineer',
-    tagline: 'High-concurrency microservices, gRPC, database indexing, caching strategies, and resilient pipelines.',
+    badge: 'CORE ENGINEERING',
+    badgeColor: '#38bdf8',
+    title: 'Backend Microservices & DSA',
+    company: 'Amazon',
+    role: 'Backend SDE II',
+    seniority: 'Mid-Level',
+    accent: '#38bdf8',
+    description: 'Algorithmic efficiency, concurrency, database indexing, and defensive edge-case handling.',
     icon: Layers,
-    accent: '#10b981',
-    coreConcepts: ['Idempotency Keys', 'gRPC & Protobuf', 'Redis Caching', 'PostgreSQL Query Optimization'],
   },
   {
-    id: 'full-stack',
-    title: 'Full-Stack Product Engineering',
-    baseRole: 'Full-Stack Engineer',
-    role: 'Full-Stack Engineer',
-    tagline: 'End-to-end product architecture, real-time WebSockets, responsive state, and API gateways.',
-    icon: Layers,
-    accent: '#ec4899',
-    coreConcepts: ['WebSocket Multiplexing', 'GraphQL Federation', 'State Management', 'SSR & Hydration'],
-  },
-  {
-    id: 'low-latency',
-    title: 'High-Throughput & Low-Latency Systems',
-    baseRole: 'Systems Performance Engineer',
-    role: 'Systems Performance Engineer',
-    tagline: 'Sub-millisecond processing, zero-copy network buffers, memory layout, and lockless ring queues.',
-    icon: Zap,
+    id: 'fintech',
+    badge: 'HIGH INTEGRITY',
+    badgeColor: '#f59e0b',
+    title: 'FinTech & Transaction Systems',
+    company: 'Stripe',
+    role: 'Financial Systems Engineer',
+    seniority: 'Senior',
     accent: '#f59e0b',
-    coreConcepts: ['Lock-free Queues', 'Zero-Copy I/O', 'Cache-Line Alignment', 'Kernel Bypass (DPDK)'],
+    description: 'ACID semantics, idempotency, race condition prevention, and zero-data-loss pipelines.',
+    icon: Zap,
   },
   {
-    id: 'sre-devops',
-    title: 'Site Reliability & Infrastructure Platform',
-    baseRole: 'Site Reliability Engineer',
-    role: 'Site Reliability Engineer',
-    tagline: 'Kubernetes orchestration, distributed tracing, automated failover, and SLO/SLA reliability.',
-    icon: Server,
-    accent: '#06b6d4',
-    coreConcepts: ['Kubernetes Operators', 'OpenTelemetry Tracing', 'Chaos Engineering', 'Canary Rollouts'],
+    id: 'fullstack',
+    badge: 'PRODUCT SCALE',
+    badgeColor: '#a855f7',
+    title: 'Full-Stack Product & Scaled UI',
+    company: 'Databricks',
+    role: 'Full-Stack Product Engineer',
+    seniority: 'Mid-Level',
+    accent: '#a855f7',
+    description: 'End-to-end component contracts, REST/GraphQL APIs, real-time UI state, and project deep-dives.',
+    icon: Sparkles,
   },
-];
-
-const COMPANIES = [
-  'Google',
-  'Meta',
-  'Amazon',
-  'Stripe',
-  'Databricks',
-  'Apple',
-  'Netflix',
-  'OpenAI',
-];
-
-const SENIORITY_LEVELS = [
-  'Junior (L3)',
-  'Mid-Level (L4)',
-  'Senior (L5)',
-  'Staff (L6)',
-  'Principal (L7)',
 ];
 
 export default function Dashboard() {
@@ -121,334 +93,407 @@ export default function Dashboard() {
   } = useInterview();
 
   const navigate = useNavigate();
+  const [recentSessions, setRecentSessions] = useState<SessionSummary[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(true);
 
-  const [selectedTrackId, setSelectedTrackId] = useState<string>('dist-sys');
-
-  // Keep track highlighting synchronized if targetRole matches a known track
   useEffect(() => {
-    const matchedTrack = TRACKS.find(t =>
-      targetRole.toLowerCase().includes(t.baseRole.toLowerCase())
-    );
-    if (matchedTrack) {
-      setSelectedTrackId(matchedTrack.id);
-    }
-  }, [targetRole]);
+    let isMounted = true;
+    getHistory(5, 0)
+      .then((data) => {
+        if (isMounted) {
+          setRecentSessions(data.sessions || []);
+        }
+      })
+      .catch((err) => {
+        console.warn('[dashboard] Failed to load recent history:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingHistory(false);
+      });
 
-  const handleSelectTrack = (track: TrackOption) => {
-    setSelectedTrackId(track.id);
-    const cleanBase = track.baseRole;
-    const combinedRole = seniority.toLowerCase() === 'mid-level' ? cleanBase : `${seniority} ${cleanBase}`;
-    setTargetRole(combinedRole);
-  };
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
-  const handleSelectSeniority = (levelStr: string) => {
-    const cleanSeniority = levelStr.split(' ')[0];
-    setSeniority(cleanSeniority);
-    // Dynamically update targetRole so seniority is composed with role title
-    const currentBase = targetRole.replace(/^(Junior|Mid-Level|Senior|Staff|Principal)\s+/i, '') || 'Distributed Systems Engineer';
-    const combinedRole = cleanSeniority.toLowerCase() === 'mid-level' ? currentBase : `${cleanSeniority} ${currentBase}`;
-    setTargetRole(combinedRole);
-  };
-
-  const handleProceed = () => {
+  const handleApplyPreset = (preset: PresetTemplate) => {
+    setTargetCompany(preset.company);
+    setTargetRole(preset.role);
+    setSeniority(preset.seniority);
     navigate('/setup');
   };
 
   const candidateName = user?.displayName?.split(' ')[0] || 'Engineer';
 
-  return (
-    <div style={{ maxWidth: 1040, margin: '0 auto', padding: '40px 24px' }}>
-      {/* Top Banner */}
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 32 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <span className="status-pill status-pill-cyan">
-            <Sparkles size={12} />
-            ENGINEERING DOMAIN SETUP
-          </span>
-          <span style={{ fontSize: 12, color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }}>
-            CANDIDATE: {candidateName.toUpperCase()}
-          </span>
-        </div>
+  const getScoreBadge = (score: number | null) => {
+    if (score === null || score === undefined) {
+      return (
+        <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, background: 'rgba(255, 255, 255, 0.05)', color: '#94a3b8' }}>
+          Pending
+        </span>
+      );
+    }
+    const color = score >= 75 ? '#10b981' : score >= 50 ? '#f59e0b' : '#ef4444';
+    return (
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+          padding: '3px 8px',
+          borderRadius: 6,
+          background: `${color}18`,
+          color,
+          border: `1px solid ${color}40`,
+        }}
+      >
+        {score} / 100
+      </span>
+    );
+  };
 
-        <h1
-          style={{
-            fontSize: 30,
-            fontWeight: 800,
-            fontFamily: "'Space Grotesk', sans-serif",
-            letterSpacing: '-0.025em',
-            marginBottom: 8,
-          }}
-        >
-          Engineering Domain & Target Calibration
-        </h1>
-        <p style={{ color: '#94a3b8', fontSize: 14, maxWidth: 640 }}>
-          Calibrate your technical mock interview to your target company, engineering track, and seniority level.
-        </p>
+  const getRecommendationPill = (rec: string | null) => {
+    if (!rec) return null;
+    const isHire = rec.toUpperCase().includes('HIRE') && !rec.toUpperCase().includes('NO');
+    const color = isHire ? '#10b981' : '#ef4444';
+    return (
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          padding: '2px 8px',
+          borderRadius: 4,
+          background: `${color}15`,
+          color,
+          border: `1px solid ${color}35`,
+          letterSpacing: '0.05em',
+        }}
+      >
+        {rec.toUpperCase()}
+      </span>
+    );
+  };
+
+  return (
+    <div style={{ maxWidth: 1080, margin: '0 auto', padding: '36px 24px' }}>
+      {/* Hero Command Banner */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="studio-card"
+        style={{
+          padding: '32px',
+          background: 'linear-gradient(135deg, rgba(14, 18, 28, 0.95) 0%, rgba(20, 26, 42, 0.95) 100%)',
+          border: '1px solid rgba(99, 102, 241, 0.25)',
+          borderRadius: 16,
+          marginBottom: 32,
+          position: 'relative',
+          overflow: 'hidden',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+        }}
+      >
+        <div style={{ position: 'relative', zIndex: 2 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <span className="status-pill status-pill-cyan">
+              <Sparkles size={12} />
+              AI MOCK INTERVIEWER · COMMAND CENTER
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace" }}>
+                ACTIVE PROFILE:
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#38bdf8', padding: '2px 8px', borderRadius: 4, background: 'rgba(56, 189, 248, 0.12)' }}>
+                {targetCompany} · {targetRole} ({seniority})
+              </span>
+            </div>
+          </div>
+
+          <h1
+            style={{
+              fontSize: 32,
+              fontWeight: 800,
+              fontFamily: "'Space Grotesk', sans-serif",
+              letterSpacing: '-0.025em',
+              marginBottom: 10,
+              color: '#f8fafc',
+            }}
+          >
+            Welcome, {candidateName}!
+          </h1>
+          <p style={{ color: '#94a3b8', fontSize: 15, maxWidth: 680, lineHeight: 1.6, marginBottom: 24 }}>
+            Prepare for real-world technical interviews with live speech-to-speech AI evaluators. Calibrated against actual hiring standards—from IT services like <strong>TCS & Infosys</strong> to FinTech and Big Tech.
+          </p>
+
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => navigate('/setup')}
+              className="btn-primary"
+              style={{
+                padding: '12px 24px',
+                fontSize: 14,
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 0 20px rgba(99, 102, 241, 0.35)',
+              }}
+            >
+              <Sparkles size={16} />
+              <span>Start New Mock Interview</span>
+              <ArrowRight size={16} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate('/history')}
+              className="btn-secondary"
+              style={{ padding: '12px 20px', fontSize: 14 }}
+            >
+              <HistoryIcon size={16} />
+              <span>View Past Dossiers</span>
+            </button>
+          </div>
+        </div>
       </motion.div>
 
-      {/* Track Selection Grid */}
+      {/* 1-Click Quick-Launch Presets */}
       <div style={{ marginBottom: 36 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, color: '#f8fafc' }}>
-            1. Select Engineering Domain
-          </h2>
-          <span style={{ fontSize: 12, color: '#64748b' }}>Choose one core competency focus</span>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: '#f8fafc', margin: 0 }}>
+              Quick-Launch Presets
+            </h2>
+            <p style={{ fontSize: 12, color: '#64748b', margin: '4px 0 0 0' }}>
+              1-click calibrated session setups tailored to specific company archetypes and seniority tiers
+            </p>
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
-          {TRACKS.map((track) => {
-            const isSelected = selectedTrackId === track.id;
-            const Icon = track.icon;
+          {PRESET_TEMPLATES.map((preset) => {
+            const Icon = preset.icon;
             return (
               <div
-                key={track.id}
-                onClick={() => handleSelectTrack(track)}
-                className={`studio-card ${isSelected ? 'studio-card-glow' : ''}`}
+                key={preset.id}
+                onClick={() => handleApplyPreset(preset)}
+                className="studio-card"
                 style={{
                   padding: 20,
                   cursor: 'pointer',
-                  border: isSelected
-                    ? `1px solid ${track.accent}`
-                    : '1px solid rgba(255, 255, 255, 0.08)',
-                  background: isSelected
-                    ? 'rgba(18, 24, 38, 0.95)'
-                    : 'rgba(14, 17, 24, 0.7)',
-                  position: 'relative',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: 'rgba(14, 18, 28, 0.75)',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
+                  transition: 'all 0.15s ease',
                 }}
               >
                 <div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      marginBottom: 14,
-                    }}
-                  >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        background: `${preset.badgeColor}15`,
+                        color: preset.badgeColor,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      {preset.badge}
+                    </span>
                     <div
                       style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 10,
-                        background: `${track.accent}15`,
-                        border: `1px solid ${track.accent}35`,
+                        width: 32,
+                        height: 32,
+                        borderRadius: 8,
+                        background: `${preset.accent}15`,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: track.accent,
+                        color: preset.accent,
                       }}
                     >
-                      <Icon size={20} />
+                      <Icon size={16} />
                     </div>
-                    {isSelected && (
-                      <div
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: '50%',
-                          background: track.accent,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#000',
-                        }}
-                      >
-                        <Check size={14} strokeWidth={3} />
-                      </div>
-                    )}
                   </div>
 
-                  <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: '#f8fafc' }}>
-                    {track.title}
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: '#f8fafc', marginBottom: 6 }}>
+                    {preset.title}
                   </h3>
-                  <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, marginBottom: 14 }}>
-                    {track.tagline}
+                  <div style={{ fontSize: 12, color: '#a5b4fc', fontWeight: 600, marginBottom: 8 }}>
+                    {preset.company} · {preset.role}
+                  </div>
+                  <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, marginBottom: 16 }}>
+                    {preset.description}
                   </p>
                 </div>
 
-                <div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {track.coreConcepts.slice(0, 2).map((concept, i) => (
-                      <span
-                        key={i}
-                        style={{
-                          fontSize: 10,
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                          background: 'rgba(255, 255, 255, 0.04)',
-                          color: '#cbd5e1',
-                          fontFamily: "'JetBrains Mono', monospace",
-                        }}
-                      >
-                        {concept}
-                      </span>
-                    ))}
-                  </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingTop: 12,
+                    borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: '#64748b' }}>1-Click Setup</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: preset.accent, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>Launch</span>
+                    <ArrowRight size={14} />
+                  </span>
                 </div>
               </div>
             );
           })}
         </div>
-
-        {/* Active Role Quick Editor */}
-        <div
-          style={{
-            marginTop: 18,
-            padding: '12px 18px',
-            borderRadius: 10,
-            background: 'rgba(255, 255, 255, 0.02)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
-          <Briefcase size={16} color="#818cf8" />
-          <span style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap', fontWeight: 600 }}>
-            Active Role:
-          </span>
-          <input
-            type="text"
-            value={targetRole}
-            onChange={(e) => setTargetRole(e.target.value)}
-            placeholder="e.g. Staff Distributed Systems Engineer"
-            style={{
-              flex: 1,
-              padding: '7px 12px',
-              fontSize: 13,
-              borderRadius: 6,
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              color: '#f8fafc',
-              outline: 'none',
-            }}
-          />
-        </div>
       </div>
 
-      {/* Target Company & Seniority Configuration */}
-      <div
-        className="studio-card"
-        style={{
-          padding: 24,
-          background: 'rgba(14, 17, 24, 0.8)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
-          marginBottom: 36,
-        }}
-      >
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24 }}>
-          {/* Target Company */}
+      {/* Recent Evaluations & Dossiers */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <Building2 size={16} color="#818cf8" />
-              <label style={{ fontSize: 13, fontWeight: 600, color: '#f8fafc' }}>
-                2. Target Organization Tier
-              </label>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {COMPANIES.map((comp) => {
-                const isCompSelected = targetCompany.toLowerCase() === comp.toLowerCase();
-                return (
-                  <button
-                    key={comp}
-                    type="button"
-                    onClick={() => setTargetCompany(comp)}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 8,
-                      fontSize: 13,
-                      fontWeight: isCompSelected ? 600 : 400,
-                      background: isCompSelected ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.03)',
-                      border: isCompSelected
-                        ? '1px solid rgba(99, 102, 241, 0.6)'
-                        : '1px solid rgba(255, 255, 255, 0.08)',
-                      color: isCompSelected ? '#c7d2fe' : '#94a3b8',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    {comp}
-                  </button>
-                );
-              })}
-            </div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: '#f8fafc', margin: 0 }}>
+              Recent Mock Interview Dossiers
+            </h2>
+            <p style={{ fontSize: 12, color: '#64748b', margin: '4px 0 0 0' }}>
+              Review objective binary assertions, transcripts, and hire recommendations from past sessions
+            </p>
           </div>
+          {recentSessions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => navigate('/history')}
+              className="btn-secondary"
+              style={{ fontSize: 12, padding: '6px 14px' }}
+            >
+              View All ({recentSessions.length})
+            </button>
+          )}
+        </div>
 
-          {/* Seniority Level */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <Award size={16} color="#10b981" />
-              <label style={{ fontSize: 13, fontWeight: 600, color: '#f8fafc' }}>
-                3. Seniority Calibration
-              </label>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {SENIORITY_LEVELS.map((level) => {
-                const isSenioritySelected = seniority.toLowerCase() === level.split(' ')[0].toLowerCase();
-                return (
-                  <button
-                    key={level}
-                    type="button"
-                    onClick={() => handleSelectSeniority(level)}
+        {isLoadingHistory ? (
+          <div className="studio-card" style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+            Loading past interview performance...
+          </div>
+        ) : recentSessions.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {recentSessions.map((session) => (
+              <div
+                key={session.session_id}
+                onClick={() => navigate(`/evaluation/${session.session_id}`)}
+                className="studio-card"
+                style={{
+                  padding: '16px 20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  cursor: 'pointer',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: 'rgba(14, 18, 28, 0.75)',
+                  transition: 'all 0.15s ease',
+                  flexWrap: 'wrap',
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div
                     style={{
-                      padding: '8px 12px',
-                      borderRadius: 8,
-                      fontSize: 12,
-                      textAlign: 'left',
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: 'rgba(99, 102, 241, 0.12)',
+                      border: '1px solid rgba(99, 102, 241, 0.25)',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between',
-                      background: isSenioritySelected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.03)',
-                      border: isSenioritySelected
-                        ? '1px solid rgba(16, 185, 129, 0.4)'
-                        : '1px solid rgba(255, 255, 255, 0.06)',
-                      color: isSenioritySelected ? '#6ee7b7' : '#94a3b8',
-                      cursor: 'pointer',
+                      justifyContent: 'center',
+                      color: '#818cf8',
                     }}
                   >
-                    <span>{level}</span>
-                    {isSenioritySelected && <Check size={14} color="#10b981" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
+                    <Building2 size={20} />
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: '#f8fafc' }}>
+                        {session.company}
+                      </span>
+                      <span style={{ fontSize: 12, color: '#64748b' }}>·</span>
+                      <span style={{ fontSize: 13, color: '#cbd5e1' }}>
+                        {session.role}
+                      </span>
+                      {getRecommendationPill(session.recommendation)}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: '#64748b', marginTop: 3 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Award size={12} />
+                        {session.seniority}
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Clock size={12} />
+                        {session.turn_count} Spoken Turns
+                      </span>
+                      <span>
+                        {new Date(session.created_at).toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
-      {/* Selected Trajectory Summary & Next Step Action */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'rgba(99, 102, 241, 0.08)',
-          border: '1px solid rgba(99, 102, 241, 0.25)',
-          borderRadius: 14,
-          padding: '18px 24px',
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: '#818cf8', marginBottom: 2 }}>
-            CONFIGURED CALIBRATION
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  {getScoreBadge(session.overall_score)}
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: '#818cf8',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <span>View Dossier</span>
+                    <ArrowRight size={14} />
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#f8fafc' }}>
-            {targetCompany} · {targetRole}
+        ) : (
+          <div
+            className="studio-card"
+            style={{
+              padding: '36px',
+              textAlign: 'center',
+              border: '1px dashed rgba(255, 255, 255, 0.12)',
+              background: 'rgba(14, 18, 28, 0.4)',
+              borderRadius: 14,
+            }}
+          >
+            <ShieldCheck size={36} color="#818cf8" style={{ margin: '0 auto 12px' }} />
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f8fafc', marginBottom: 6 }}>
+              No Completed Interviews Yet
+            </h3>
+            <p style={{ fontSize: 13, color: '#94a3b8', maxWidth: 480, margin: '0 auto 20px', lineHeight: 1.5 }}>
+              Launch your first calibrated mock interview session above. Your spoken answers will be scored across 6 real-world dimensions with verbatim evidence citations.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/setup')}
+              className="btn-primary"
+              style={{ fontSize: 13, padding: '10px 20px' }}
+            >
+              <span>Setup Your First Session</span>
+              <ArrowRight size={14} />
+            </button>
           </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleProceed}
-          className="btn-primary"
-          style={{ padding: '12px 24px', fontSize: 14 }}
-        >
-          <span>Continue to Interview Setup</span>
-          <ArrowRight size={16} />
-        </button>
+        )}
       </div>
     </div>
   );

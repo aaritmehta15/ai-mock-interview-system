@@ -23,6 +23,7 @@ from backend.models.schemas import (
 )
 from backend.services.blueprint_service import (
     build_fallback_blueprint,
+    detect_company_archetype,
     extract_text_from_pdf,
     get_blueprint,
     save_blueprint,
@@ -39,6 +40,28 @@ from backend.services.ledger_service import (
 
 
 class TestBlueprintService(unittest.TestCase):
+    def test_company_archetype_detection(self):
+        self.assertEqual(detect_company_archetype("TCS"), "IT_SERVICES")
+        self.assertEqual(detect_company_archetype("Tata Consultancy Services"), "IT_SERVICES")
+        self.assertEqual(detect_company_archetype("Infosys"), "IT_SERVICES")
+        self.assertEqual(detect_company_archetype("Wipro"), "IT_SERVICES")
+        self.assertEqual(detect_company_archetype("Accenture"), "IT_SERVICES")
+        self.assertEqual(detect_company_archetype("Stripe"), "FINTECH")
+        self.assertEqual(detect_company_archetype("Goldman Sachs"), "FINTECH")
+        self.assertEqual(detect_company_archetype("Google"), "BIG_TECH")
+        self.assertEqual(detect_company_archetype("Amazon"), "BIG_TECH")
+        self.assertEqual(detect_company_archetype("Acme Analytics Labs"), "STARTUP_PRODUCT")
+
+    def test_tcs_fallback_blueprint_calibration(self):
+        bp = build_fallback_blueprint(company="TCS", role="System Engineer", seniority="Junior", primary_language="Java")
+        self.assertEqual(bp.company, "TCS")
+        self.assertEqual(bp.role, "System Engineer")
+        self.assertIn("Enterprise Software", bp.domain)
+        self.assertEqual(len(bp.questions), 6)
+        # Check that Q1 tests OOPs in Java
+        self.assertIn("Object-Oriented", bp.questions[0].competency)
+        self.assertIn("Java", bp.questions[0].text)
+
     def test_fallback_blueprint_calibration(self):
         bp = build_fallback_blueprint(company="Stripe", role="AI Infrastructure Engineer", seniority=SeniorityLevel.SENIOR)
         self.assertEqual(bp.company, "Stripe")

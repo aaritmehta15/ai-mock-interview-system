@@ -20,9 +20,100 @@ import {
   Lightbulb,
   CheckCircle2,
   Check,
+  Server,
+  Layers,
+  BrainCircuit,
+  Zap,
 } from 'lucide-react';
 import { useInterview } from '../context/InterviewContext';
 import { createBlueprint, uploadResumePdf, type InterviewBlueprint, type PersonaProfile } from '../lib/api';
+
+interface TrackOption {
+  id: string;
+  title: string;
+  baseRole: string;
+  tagline: string;
+  icon: React.ElementType;
+  accent: string;
+  defaultLanguages: string[];
+  defaultFocuses: string[];
+}
+
+const DOMAIN_TRACKS: TrackOption[] = [
+  {
+    id: 'backend',
+    title: 'Backend & Scaled Microservices',
+    baseRole: 'Backend Engineer',
+    tagline: 'Microservices, APIs, database indexing, and caching.',
+    icon: Layers,
+    accent: '#10b981',
+    defaultLanguages: ['Python', 'Java'],
+    defaultFocuses: ['Balanced Screening', 'Coding & DSA'],
+  },
+  {
+    id: 'full-stack',
+    title: 'Full-Stack Product Engineering',
+    baseRole: 'Full-Stack Engineer',
+    tagline: 'End-to-end web apps, REST/GraphQL APIs, and UI state.',
+    icon: Layers,
+    accent: '#ec4899',
+    defaultLanguages: ['TypeScript / JS', 'Python'],
+    defaultFocuses: ['Balanced Screening', 'Project Deep-Dive'],
+  },
+  {
+    id: 'dist-sys',
+    title: 'Distributed Systems & Cloud Infra',
+    baseRole: 'Distributed Systems Engineer',
+    tagline: 'Consensus protocols, high availability, and cloud scale.',
+    icon: Server,
+    accent: '#38bdf8',
+    defaultLanguages: ['Go', 'C++'],
+    defaultFocuses: ['System Design', 'Balanced Screening'],
+  },
+  {
+    id: 'ai-platform',
+    title: 'AI / ML Platform & LLM Infrastructure',
+    baseRole: 'AI Infrastructure Engineer',
+    tagline: 'Model serving, vector search, embeddings, and pipelines.',
+    icon: BrainCircuit,
+    accent: '#8b5cf6',
+    defaultLanguages: ['Python'],
+    defaultFocuses: ['Coding & DSA', 'System Design'],
+  },
+  {
+    id: 'low-latency',
+    title: 'High-Throughput & Low-Latency Systems',
+    baseRole: 'Systems Performance Engineer',
+    tagline: 'Memory layout, zero-copy buffers, and concurrency.',
+    icon: Zap,
+    accent: '#f59e0b',
+    defaultLanguages: ['C++', 'Rust'],
+    defaultFocuses: ['Coding & DSA', 'System Design'],
+  },
+  {
+    id: 'sre-devops',
+    title: 'Site Reliability & Infrastructure Platform',
+    baseRole: 'Site Reliability Engineer',
+    tagline: 'Kubernetes orchestration, tracing, and failover.',
+    icon: Server,
+    accent: '#06b6d4',
+    defaultLanguages: ['Go', 'Python'],
+    defaultFocuses: ['System Design', 'Balanced Screening'],
+  },
+];
+
+const POPULAR_COMPANIES = [
+  'Google',
+  'TCS',
+  'Amazon',
+  'Infosys',
+  'Stripe',
+  'Meta',
+  'Wipro',
+  'Accenture',
+  'Databricks',
+  'Netflix',
+];
 
 const SAMPLE_STAFF_RESUME = `
 Alex Morgan — Staff Distributed Systems Engineer
@@ -251,20 +342,73 @@ export default function Intake() {
         </p>
       </motion.div>
 
-      {/* Target Position Calibration */}
+      {/* 1. Target Domain & Company Calibration */}
       <div
         className="studio-card"
         style={{
-          padding: '20px 24px',
+          padding: '24px',
           background: 'rgba(14, 18, 28, 0.85)',
           border: '1px solid rgba(255, 255, 255, 0.09)',
           marginBottom: 24,
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span>1. Target Role & Company Calibration</span>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Building2 size={16} color="#818cf8" />
+            <span>1. Target Domain, Company & Seniority Calibration</span>
+          </div>
+          <span style={{ fontSize: 11, color: '#94a3b8' }}>
+            Select an engineering track or type any custom company & role
+          </span>
         </div>
 
+        {/* Domain Track Quick Selector */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace", display: 'block', marginBottom: 10 }}>
+            SELECT ENGINEERING DOMAIN TRACK (OPTIONAL QUICK PRESET)
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+            {DOMAIN_TRACKS.map((t) => {
+              const isSelected = targetRole.toLowerCase().includes(t.baseRole.toLowerCase());
+              const Icon = t.icon;
+              return (
+                <div
+                  key={t.id}
+                  onClick={() => {
+                    const cleanSeniority = seniority.split('/')[0].trim();
+                    const combined = cleanSeniority.toLowerCase() === 'mid-level' ? t.baseRole : `${cleanSeniority} ${t.baseRole}`;
+                    setTargetRole(combined);
+                    if (t.defaultLanguages.length > 0) setSelectedLanguages(t.defaultLanguages);
+                    if (t.defaultFocuses.length > 0) setSelectedFocuses(t.defaultFocuses);
+                  }}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                    background: isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255, 255, 255, 0.02)',
+                    border: isSelected ? `1.5px solid ${t.accent}` : '1px solid rgba(255, 255, 255, 0.07)',
+                    transition: 'all 0.15s ease',
+                    boxShadow: isSelected ? `0 0 14px ${t.accent}25` : 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <div style={{ width: 24, height: 24, borderRadius: 6, background: `${t.accent}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.accent }}>
+                      <Icon size={14} />
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: isSelected ? '#f8fafc' : '#cbd5e1' }}>
+                      {t.title}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.4 }}>
+                    {t.tagline}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Inputs row: Company, Level, Role */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
           {/* Target Company */}
           <div>
@@ -276,7 +420,7 @@ export default function Intake() {
               type="text"
               value={targetCompany}
               onChange={(e) => setTargetCompany(e.target.value)}
-              placeholder="e.g. Google, Stripe, Meta, Amazon..."
+              placeholder="e.g. TCS, Google, Infosys, Stripe, Meta, Amazon..."
               style={{
                 fontSize: 13,
                 padding: '9px 12px',
@@ -286,8 +430,35 @@ export default function Intake() {
                 border: '1px solid rgba(255,255,255,0.12)',
                 color: '#f8fafc',
                 outline: 'none',
+                marginBottom: 8,
               }}
             />
+            {/* Quick Company Badges */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {POPULAR_COMPANIES.map((comp) => {
+                const isSelected = targetCompany.trim().toLowerCase() === comp.toLowerCase();
+                return (
+                  <button
+                    key={comp}
+                    type="button"
+                    onClick={() => setTargetCompany(comp)}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      padding: '3px 8px',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      border: isSelected ? '1px solid #818cf8' : '1px solid rgba(255,255,255,0.08)',
+                      background: isSelected ? 'rgba(129, 140, 248, 0.2)' : 'rgba(255,255,255,0.02)',
+                      color: isSelected ? '#a5b4fc' : '#94a3b8',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {comp}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Job Level / Seniority */}
@@ -318,6 +489,9 @@ export default function Intake() {
               <option value="Staff">Staff (L6 / Staff Engineer)</option>
               <option value="Principal">Principal (L7+ / Director)</option>
             </select>
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
+              Calibrates question depth from student CS basics to Staff architecture.
+            </div>
           </div>
 
           {/* Target Role */}
@@ -330,7 +504,7 @@ export default function Intake() {
               type="text"
               value={targetRole}
               onChange={(e) => setTargetRole(e.target.value)}
-              placeholder="e.g. Distributed Systems Engineer"
+              placeholder="e.g. Software Engineer, Full-Stack, Java Developer..."
               style={{
                 fontSize: 13,
                 padding: '9px 12px',
@@ -342,6 +516,9 @@ export default function Intake() {
                 outline: 'none',
               }}
             />
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
+              Enter any technical role or choose from the domain tracks above.
+            </div>
           </div>
         </div>
       </div>
