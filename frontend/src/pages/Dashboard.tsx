@@ -151,7 +151,7 @@ export default function Dashboard() {
   };
 
   const handleProceed = () => {
-    navigate('/intake');
+    navigate('/setup');
   };
 
   const candidateName = user?.displayName?.split(' ')[0] || 'Engineer';
@@ -163,7 +163,7 @@ export default function Dashboard() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <span className="status-pill status-pill-cyan">
             <Sparkles size={12} />
-            STAGE 1 OF 5 · TRAJECTORY SELECTION
+            ENGINEERING DOMAIN SETUP
           </span>
           <span style={{ fontSize: 12, color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }}>
             CANDIDATE: {candidateName.toUpperCase()}
@@ -179,10 +179,10 @@ export default function Dashboard() {
             marginBottom: 8,
           }}
         >
-          Define Your Technical Trajectory
+          Engineering Domain & Target Calibration
         </h1>
         <p style={{ color: '#94a3b8', fontSize: 14, maxWidth: 640 }}>
-          Apex calibrates every question, pause tolerance, and scoring assertion to your target company and domain. Select your target track to begin.
+          Calibrate your technical mock interview to your target company, engineering track, and seniority level.
         </p>
       </motion.div>
 
@@ -446,7 +446,7 @@ export default function Dashboard() {
           className="btn-primary"
           style={{ padding: '12px 24px', fontSize: 14 }}
         >
-          <span>Proceed to Resume Intake & Blueprint</span>
+          <span>Continue to Interview Setup</span>
           <ArrowRight size={16} />
         </button>
       </div>
