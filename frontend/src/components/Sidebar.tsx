@@ -3,24 +3,23 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Mic,
   LayoutDashboard,
-  Compass,
-  FileText,
+  Sparkles,
   Users,
   ShieldCheck,
+  History,
   LogOut,
-  Activity,
   ChevronRight,
   Zap,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const NAV_ITEMS = [
-  { to: '/tour', icon: Compass, label: 'Platform Tour', badge: 'Start' },
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Trajectory Hub' },
-  { to: '/intake', icon: FileText, label: 'Resume Blueprint', badge: 'PDF' },
-  { to: '/personas', icon: Users, label: 'Staff Personas', badge: '3 Staff' },
-  { to: '/interview', icon: Mic, label: 'Voice Sound Studio', badge: 'LiveKit' },
-  { to: '/evaluation', icon: ShieldCheck, label: 'Hiring Dossier' },
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/setup', icon: Sparkles, label: 'New Interview', badge: 'Start' },
+  { to: '/interview', icon: Mic, label: 'Interview Chamber', badge: 'Live' },
+  { to: '/evaluation', icon: ShieldCheck, label: 'Evaluation Report' },
+  { to: '/history', icon: History, label: 'Past Sessions', badge: 'History' },
+  { to: '/personas', icon: Users, label: 'Interviewer Staff' },
 ];
 
 export default function Sidebar() {
@@ -40,7 +39,7 @@ export default function Sidebar() {
         .join('')
         .toUpperCase()
         .slice(0, 2)
-    : 'AP';
+    : 'AI';
 
   return (
     <aside
@@ -83,30 +82,16 @@ export default function Sidebar() {
                   style={{
                     fontFamily: "'Space Grotesk', sans-serif",
                     fontWeight: 800,
-                    fontSize: 16,
+                    fontSize: 14,
                     color: '#f8fafc',
                     letterSpacing: '-0.02em',
                   }}
                 >
-                  APEX
-                </span>
-                <span
-                  style={{
-                    fontSize: 10,
-                    padding: '2px 6px',
-                    borderRadius: 4,
-                    background: 'rgba(99, 102, 241, 0.15)',
-                    color: '#818cf8',
-                    border: '1px solid rgba(99, 102, 241, 0.3)',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontWeight: 600,
-                  }}
-                >
-                  v2.4
+                  AI MOCK INTERVIEWER
                 </span>
               </div>
               <p style={{ fontSize: 11, color: '#64748b', margin: '2px 0 0' }}>
-                Technical Voice Assessment OS
+                Real-Time Voice Technical Prep
               </p>
             </div>
           </div>
@@ -124,7 +109,7 @@ export default function Sidebar() {
               padding: '6px 10px',
             }}
           >
-            Assessment Pipeline
+            Navigation
           </span>
           {NAV_ITEMS.map(({ to, icon: Icon, label, badge }) => (
             <NavLink key={to} to={to} style={{ textDecoration: 'none' }}>
@@ -169,49 +154,36 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        {/* Architecture Specs Box */}
+        {/* Clean System Status Widget */}
         <div style={{ padding: '0 12px', marginTop: 12 }}>
           <div
             style={{
-              padding: 12,
+              padding: '12px 14px',
               background: 'rgba(255, 255, 255, 0.02)',
               border: '1px solid rgba(255, 255, 255, 0.05)',
               borderRadius: 12,
               display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', monospace",
+              alignItems: 'center',
+              gap: 10,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: '#10b981',
-                    boxShadow: '0 0 8px #10b981',
-                  }}
-                />
-                LiveKit WebRTC
-              </span>
-              <span style={{ color: '#10b981', fontWeight: 600 }}>Sub-650ms</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <ShieldCheck size={12} color="#818cf8" />
-                SQLite Ledger
-              </span>
-              <span style={{ color: '#818cf8', fontWeight: 600 }}>SHA-256</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Activity size={12} color="#38bdf8" />
-                Interviewer First
-              </span>
-              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Autonomous</span>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: '#10b981',
+                boxShadow: '0 0 10px #10b981',
+                flexShrink: 0,
+              }}
+            />
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#f8fafc' }}>
+                Voice Engine Ready
+              </div>
+              <div style={{ fontSize: 10, color: '#64748b' }}>
+                LiveKit WebRTC · Sub-Second
+              </div>
             </div>
           </div>
         </div>

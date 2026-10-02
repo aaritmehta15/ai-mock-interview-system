@@ -11,6 +11,7 @@ import Intake from './pages/Intake';
 import Personas from './pages/Personas';
 import Interview from './pages/Interview';
 import Evaluation from './pages/Evaluation';
+import History from './pages/History';
 
 export default function App() {
   return (
@@ -27,7 +28,9 @@ export default function App() {
               {/* Progressive Studio Workspace with Sidebar */}
               <Route element={<Layout />}>
                 <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/setup" element={<Intake />} />
                 <Route path="/intake" element={<Intake />} />
+                <Route path="/history" element={<History />} />
                 <Route path="/personas" element={<Personas />} />
                 <Route path="/interview" element={<Interview />} />
                 <Route path="/evaluation" element={<Evaluation />} />

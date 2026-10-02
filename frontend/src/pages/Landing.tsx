@@ -57,7 +57,7 @@ export default function Landing() {
               <Mic size={18} />
             </div>
             <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em' }}>
-              APEX
+              AI MOCK INTERVIEWER
             </span>
             <span
               style={{
@@ -71,22 +71,17 @@ export default function Landing() {
                 fontWeight: 600,
               }}
             >
-              v2.2-PROD
+              v2.5
             </span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
-              LiveKit Cloud: 680ms RTT
-            </span>
-
             {user ? (
               <button
-                onClick={() => navigate('/interview')}
+                onClick={() => navigate('/setup')}
                 className="btn-primary"
               >
-                Launch Studio
+                Start Mock Interview
                 <ArrowRight size={15} />
               </button>
             ) : (
@@ -99,10 +94,10 @@ export default function Landing() {
                   Sign in
                 </button>
                 <button
-                  onClick={() => navigate('/interview')}
+                  onClick={() => navigate('/setup')}
                   className="btn-primary"
                 >
-                  Enter Studio (Guest)
+                  Start as Guest
                   <ArrowRight size={15} />
                 </button>
               </div>
@@ -138,7 +133,7 @@ export default function Landing() {
           >
             <Zap size={14} color="#38bdf8" />
             <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: '#cbd5e1' }}>
-              Sub-800ms Full-Duplex WebRTC · LangGraph State Machine
+              Real-Time Voice Technical Assessment Platform
             </span>
           </motion.div>
 
@@ -155,7 +150,7 @@ export default function Landing() {
               margin: '0 auto 24px',
             }}
           >
-            The Full-Duplex AI Technical Interviewer{' '}
+            Practice Real Technical Interviews with{' '}
             <span
               style={{
                 background: 'linear-gradient(135deg, #a5b4fc 0%, #38bdf8 50%, #34d399 100%)',
@@ -163,7 +158,7 @@ export default function Landing() {
                 WebkitTextFillColor: 'transparent',
               }}
             >
-              That Cannot Hallucinate.
+              Autonomous Voice AI.
             </span>
           </motion.h1>
 
@@ -179,9 +174,8 @@ export default function Landing() {
               lineHeight: 1.65,
             }}
           >
-            Real engineering interviews aren't simple text prompts. Apex pairs candidates with
-            calibrated interviewer personas over live WebRTC voice audio, backed by an append-only Turn Ledger
-            guaranteeing zero phantom questions.
+            Experience natural, low-latency technical interviews calibrated to your exact target company,
+            role, and seniority level. Backed by verified evidence scoring and zero hallucinations.
           </motion.p>
 
           <motion.div
@@ -191,23 +185,23 @@ export default function Landing() {
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, flexWrap: 'wrap' }}
           >
             <button
-              onClick={() => navigate('/interview')}
+              onClick={() => navigate('/setup')}
               className="btn-primary"
               style={{ fontSize: 15, padding: '14px 32px' }}
             >
-              Launch Interview Studio
+              Start Your Mock Interview
               <ArrowRight size={18} />
             </button>
             <button
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate('/history')}
               className="btn-secondary"
               style={{ fontSize: 15, padding: '14px 26px' }}
             >
-              View System Telemetry
+              Past Sessions & History
             </button>
           </motion.div>
 
-          {/* Quick SLA Specs Pill Row */}
+          {/* Value Highlights */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -225,15 +219,15 @@ export default function Landing() {
             }}
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Zap size={14} color="#38bdf8" /> p50 TTFT: &lt;520ms
+              <Zap size={14} color="#38bdf8" /> Real-Time Voice Dialogue
             </span>
             <span style={{ color: 'rgba(255, 255, 255, 0.1)' }}>|</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Cpu size={14} color="#a78bfa" /> Silero VAD: 200ms
+              <Cpu size={14} color="#a78bfa" /> Calibrated Staff Personas
             </span>
             <span style={{ color: 'rgba(255, 255, 255, 0.1)' }}>|</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <ShieldCheck size={14} color="#10b981" /> Zero Phantom Questions
+              <ShieldCheck size={14} color="#10b981" /> Evidence-Grounded Evaluation
             </span>
           </motion.div>
         </div>
@@ -504,18 +498,17 @@ export default function Landing() {
       <section style={{ padding: '80px 0', borderTop: '1px solid rgba(255, 255, 255, 0.06)', background: 'linear-gradient(180deg, transparent 0%, rgba(79, 70, 229, 0.04) 100%)' }}>
         <div className="studio-container" style={{ textAlign: 'center' }}>
           <h2 style={{ fontSize: 32, fontWeight: 800, marginBottom: 16 }}>
-            Experience the Real Voice Studio
+            Ready to Ace Your Next Interview?
           </h2>
           <p style={{ fontSize: 16, color: '#94a3b8', maxWidth: 560, margin: '0 auto 32px' }}>
-            Choose a target company preset or upload your resume to experience an evidence-grounded
-            technical interview in under 60 seconds.
+            Set your target company, calibrate role seniority, and practice live with natural voice interaction.
           </p>
           <button
-            onClick={() => navigate('/interview')}
+            onClick={() => navigate('/setup')}
             className="btn-primary"
             style={{ fontSize: 16, padding: '16px 36px' }}
           >
-            Launch Voice Studio (Zero Signup)
+            Start Your Mock Interview
             <ArrowRight size={18} />
           </button>
         </div>
@@ -524,7 +517,7 @@ export default function Landing() {
       {/* Modern Engineering Footer */}
       <footer style={{ borderTop: '1px solid rgba(255, 255, 255, 0.06)', padding: '32px 0', fontSize: 12, color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }}>
         <div className="studio-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <span>APEX · Flagship Autonomous AI Technical Interviewer</span>
+          <span>AI MOCK INTERVIEWER · Real-Time Voice Technical Assessment Platform</span>
           <span>LiveKit WebRTC · Gemini Realtime · SQLite Ledger</span>
         </div>
       </footer>
