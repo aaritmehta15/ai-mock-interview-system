@@ -43,7 +43,7 @@ class TestBlueprintService(unittest.TestCase):
         bp = build_fallback_blueprint(company="Stripe", role="AI Infrastructure Engineer", seniority=SeniorityLevel.SENIOR)
         self.assertEqual(bp.company, "Stripe")
         self.assertEqual(bp.role, "AI Infrastructure Engineer")
-        self.assertEqual(len(bp.questions), 3)
+        self.assertEqual(len(bp.questions), 6)
         self.assertGreaterEqual(len(bp.keywords), 5)
 
         # Check binary assertions sum to 1.0 per question
@@ -133,23 +133,20 @@ class TestEvaluationService(unittest.TestCase):
         loop.close()
 
         # Check anti-phantom guarantee:
-        # Exactly 3 questions in blueprint
-        self.assertEqual(len(report.question_evaluations), 3)
+        # Exactly 6 questions in blueprint (3 foundational + 3 deep-dive)
+        self.assertEqual(len(report.question_evaluations), 6)
         
         # Q0 is VERIFIED
         self.assertEqual(report.question_evaluations[0].status, "VERIFIED")
         self.assertGreater(report.question_evaluations[0].score, 0.0)
 
-        # Q1 and Q2 MUST be UNREACHED with weight 0.0 and score 0.0
-        self.assertEqual(report.question_evaluations[1].status, "UNREACHED")
-        self.assertEqual(report.question_evaluations[1].weight, 0.0)
-        self.assertEqual(report.question_evaluations[1].score, 0.0)
+        # Q1 through Q5 MUST be UNREACHED with weight 0.0 and score 0.0
+        for unasked_idx in range(1, 6):
+            self.assertEqual(report.question_evaluations[unasked_idx].status, "UNREACHED")
+            self.assertEqual(report.question_evaluations[unasked_idx].weight, 0.0)
+            self.assertEqual(report.question_evaluations[unasked_idx].score, 0.0)
 
-        self.assertEqual(report.question_evaluations[2].status, "UNREACHED")
-        self.assertEqual(report.question_evaluations[2].weight, 0.0)
-        self.assertEqual(report.question_evaluations[2].score, 0.0)
-
-        self.assertEqual(report.unreached_question_count, 2)
+        self.assertEqual(report.unreached_question_count, 5)
 
         # The candidate's overall score must be calculated ONLY over the reached question (Q0)
         # and NOT divided by 3 (which would falsely penalize them with a failing score)

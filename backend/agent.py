@@ -268,15 +268,22 @@ async def entrypoint(ctx: JobContext):
         transcript = getattr(event, "transcript", "").strip()
         is_final = getattr(event, "is_final", False)
         if transcript and is_final:
-            clean_text = _normalize_speech_to_english(transcript)
-            word_count = len(clean_text.split())
-            logger.info("[ledger] Candidate speech recorded (%d words): %s", word_count, clean_text[:80])
-            ledger_service.record_turn(
-                session_id=session_id,
-                speaker=TurnSpeaker.CANDIDATE,
-                text=clean_text,
-                confidence=1.0,
-            )
+            async def _process_candidate_turn(raw_text: str):
+                clean_text = raw_text
+                if _contains_devanagari(raw_text) and _groq_client:
+                    try:
+                        clean_text = await asyncio.to_thread(_normalize_speech_to_english, raw_text)
+                    except Exception as err:
+                        logger.warning("[stt-sanitizer] Background normalization failed: %s", err)
+                word_count = len(clean_text.split())
+                logger.info("[ledger] Candidate speech recorded (%d words): %s", word_count, clean_text[:80])
+                ledger_service.record_turn(
+                    session_id=session_id,
+                    speaker=TurnSpeaker.CANDIDATE,
+                    text=clean_text,
+                    confidence=1.0,
+                )
+            asyncio.create_task(_process_candidate_turn(transcript))
 
     @session.on("conversation_item_added")
     def on_conversation_item(event):

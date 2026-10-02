@@ -133,7 +133,7 @@ class TestEndToEndInterviewPipeline(unittest.TestCase):
 
         # Anti-Phantom Guarantees
         self.assertEqual(report["session_id"], session_id)
-        self.assertIn(report["recommendation"], ["STRONG HIRE", "HIRE", "LEAN HIRE", "NO HIRE"])
+        self.assertIn(report["recommendation"], ["STRONG HIRE", "HIRE", "LEAN HIRE", "BORDERLINE", "NO HIRE"])
         self.assertGreaterEqual(report["overall_score"], 0)
         self.assertEqual(report["session_hash"], ledger_info["session_hash"])
 
