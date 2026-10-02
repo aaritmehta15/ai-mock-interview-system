@@ -301,13 +301,15 @@ async def entrypoint(ctx: JobContext):
     # Brief 300ms grace sleep to allow WebRTC audio negotiation
     await asyncio.sleep(0.3)
 
-    logger.info("[agent] Triggering autonomous opening greeting as %s (%s at %s)...", persona.name, role_name, company_name)
+    logger.info("[agent] Triggering autonomous opening greeting as %s (%s at %s)...", persona.name, calibrated_role_title, company_name)
     try:
         handle = session.generate_reply(
             user_input="Session started. Begin the interview with your opening greeting now.",
         )
-        await handle
+        await asyncio.wait_for(handle, timeout=12.0)
         logger.info("[agent] Autonomous opening greeting delivered successfully.")
+    except asyncio.TimeoutError:
+        logger.warning("[agent] Opening greeting timed out after 12s; continuing to listen for candidate audio.")
     except Exception as e:
         logger.error("[agent] generate_reply greeting failed: %s", e)
 

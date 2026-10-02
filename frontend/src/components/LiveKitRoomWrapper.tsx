@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   LiveKitRoom,
   RoomAudioRenderer,
+  StartAudio,
   useRoomContext,
   useLocalParticipant,
   useRemoteParticipants,
@@ -314,6 +315,7 @@ export default function LiveKitRoomWrapper({
       data-lk-theme="default"
     >
       <RoomAudioRenderer />
+      <StartAudio label="🔊 Click to enable audio playback" />
       <RoomControls onLeave={onLeave} sessionTitle={sessionTitle} persona={persona} />
     </LiveKitRoom>
   );
