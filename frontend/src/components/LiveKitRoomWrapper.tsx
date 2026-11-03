@@ -1,12 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  LiveKitRoom,
-  RoomAudioRenderer,
-  StartAudio,
-  useRoomContext,
-  useLocalParticipant,
-} from '@livekit/components-react';
-import {
   Mic,
   MicOff,
   PhoneOff,
@@ -24,12 +17,13 @@ import LatencyTelemetry from './LatencyTelemetry';
 import {
   startInterviewSession,
   sendInterviewTurn,
+  transcribeAudio,
   type Persona,
 } from '../lib/api';
 
 interface LiveKitRoomWrapperProps {
-  token: string;
-  serverUrl: string;
+  token?: string;
+  serverUrl?: string;
   onLeave: () => void;
   sessionTitle: string;
   persona?: Persona | null;
@@ -67,14 +61,13 @@ function selectPersonaVoice(voices: SpeechSynthesisVoice[], personaId?: string):
       englishVoices[0]
     );
   }
-  // Alex (empathetic, natural)
   return (
     englishVoices.find(v => /natural|google|online|david|daniel/i.test(v.name)) ||
     englishVoices[0]
   );
 }
 
-function RoomControls({
+function LiveKitRoomWrapper({
   onLeave,
   sessionTitle,
   persona,
@@ -83,19 +76,7 @@ function RoomControls({
   targetRole,
   seniority,
   participantName,
-}: {
-  onLeave: () => void;
-  sessionTitle: string;
-  persona?: Persona | null;
-  sessionId?: string;
-  targetCompany?: string;
-  targetRole?: string;
-  seniority?: string;
-  participantName?: string;
-}) {
-  const room = useRoomContext();
-  const { localParticipant } = useLocalParticipant();
-
+}: LiveKitRoomWrapperProps) {
   // Conversational state
   const [turns, setTurns] = useState<TurnRecord[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
@@ -110,40 +91,128 @@ function RoomControls({
   const [showManualInput, setShowManualInput] = useState<boolean>(false);
   const [showTranscript, setShowTranscript] = useState<boolean>(false);
   const [micMuted, setMicMuted] = useState<boolean>(false);
+  const [audioVolume, setAudioVolume] = useState<number>(0);
   const [hasStarted, setHasStarted] = useState<boolean>(false);
 
-  // References for speech synthesis and recognition
+  // References
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const animationFrameRef = useRef<number | null>(null);
+
   const recognitionRef = useRef<any>(null);
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const accumulatedSpeechRef = useRef<string>('');
+  const speechSafetyTimerRef = useRef<any>(null);
   const silenceTimerRef = useRef<any>(null);
+  const accumulatedSpeechRef = useRef<string>('');
+
   const isAgentSpeakingRef = useRef<boolean>(false);
   const isConcludedRef = useRef<boolean>(false);
   const micMutedRef = useRef<boolean>(false);
+  const isThinkingRef = useRef<boolean>(false);
   const transcriptBottomRef = useRef<HTMLDivElement>(null);
 
   isAgentSpeakingRef.current = isAgentSpeaking;
   isConcludedRef.current = isConcluded;
   micMutedRef.current = micMuted;
+  isThinkingRef.current = isThinking;
 
-  // Auto-scroll transcript drawer
+  // Auto-scroll turn ledger drawer
   useEffect(() => {
     if (showTranscript) {
       transcriptBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [turns, showTranscript]);
 
-  // Voice engine: Chrome speech synthesis resume heartbeat
+  // Chrome speech synthesis resume heartbeat
   useEffect(() => {
     const heartbeat = setInterval(() => {
       if (typeof window !== 'undefined' && window.speechSynthesis?.speaking && window.speechSynthesis?.paused) {
         window.speechSynthesis.resume();
       }
-    }, 2500);
+    }, 2000);
     return () => clearInterval(heartbeat);
   }, []);
 
-  // Safe SpeechSynthesis trigger
+  // Initialize Microphone & Web Audio Analyser
+  useEffect(() => {
+    let isMounted = true;
+
+    const setupMicrophone = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+
+        if (!isMounted) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        mediaStreamRef.current = stream;
+
+        // Setup real Web Audio Analyser
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          audioContextRef.current = ctx;
+          const source = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 64;
+          source.connect(analyser);
+          analyserRef.current = analyser;
+
+          // Sound level polling loop
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          const checkVolume = () => {
+            if (!isMounted) return;
+            if (analyserRef.current && !micMutedRef.current && !isAgentSpeakingRef.current) {
+              analyserRef.current.getByteFrequencyData(dataArray);
+              let sum = 0;
+              for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+              }
+              const avg = sum / dataArray.length;
+              setAudioVolume(avg);
+            } else {
+              setAudioVolume(0);
+            }
+            animationFrameRef.current = requestAnimationFrame(checkVolume);
+          };
+          checkVolume();
+        }
+      } catch (err) {
+        console.warn('[microphone] could not initialize media stream:', err);
+      }
+    };
+
+    setupMicrophone();
+
+    return () => {
+      isMounted = false;
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        try {
+          audioContextRef.current.close();
+        } catch (_) {}
+      }
+    };
+  }, []);
+
+  // Forward declarations for mutual referencing
+  const startListeningRef = useRef<() => void>(() => {});
+  const handleCandidateSubmitRef = useRef<(text: string, audioBlob?: Blob) => Promise<void>>(async () => {});
+
+  // Speak Utterance with Dual Completion Guarantee
   const speakUtterance = useCallback((text: string, onEndCallback?: () => void) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) {
       if (onEndCallback) onEndCallback();
@@ -152,10 +221,17 @@ function RoomControls({
 
     try {
       window.speechSynthesis.cancel();
-      // Temporary pause recognition while AI speaks to prevent echo feedback loop
+      if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
+
+      // Stop recognition while AI speaks to avoid hearing itself
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
+        } catch (_) {}
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try {
+          mediaRecorderRef.current.stop();
         } catch (_) {}
       }
 
@@ -179,22 +255,32 @@ function RoomControls({
         utterance.rate = 1.0;
       }
 
+      // Calculate speech duration guarantee (avg 2.4 words/sec + 1.2s padding)
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      const estimatedDurationMs = Math.max(2000, (wordCount / 2.3) * 1000 + 1200);
+
+      let hasCompleted = false;
+      const completeSpeech = () => {
+        if (hasCompleted) return;
+        hasCompleted = true;
+        if (speechSafetyTimerRef.current) {
+          clearTimeout(speechSafetyTimerRef.current);
+          speechSafetyTimerRef.current = null;
+        }
+        setIsAgentSpeaking(false);
+        activeUtteranceRef.current = null;
+        if (onEndCallback) onEndCallback();
+      };
+
       utterance.onstart = () => {
         setIsAgentSpeaking(true);
       };
 
-      utterance.onend = () => {
-        setIsAgentSpeaking(false);
-        activeUtteranceRef.current = null;
-        if (onEndCallback) onEndCallback();
-      };
+      utterance.onend = completeSpeech;
+      utterance.onerror = completeSpeech;
 
-      utterance.onerror = (e) => {
-        console.warn('[speechSynthesis] utterance error:', e);
-        setIsAgentSpeaking(false);
-        activeUtteranceRef.current = null;
-        if (onEndCallback) onEndCallback();
-      };
+      // Safety timeout: If Chrome's C++ synthesis queue drops onend, force complete cleanly
+      speechSafetyTimerRef.current = setTimeout(completeSpeech, estimatedDurationMs);
 
       window.speechSynthesis.speak(utterance);
       if (window.speechSynthesis.paused) {
@@ -207,20 +293,134 @@ function RoomControls({
     }
   }, [persona]);
 
-  // Start Candidate Listening via SpeechRecognition
+  // Candidate Turn Submission Handler
+  const handleCandidateSubmit = useCallback(async (spokenText: string, audioBlob?: Blob) => {
+    let textToSubmit = spokenText.trim();
+
+    // If text is empty but audio blob is available, transcribe via Groq Whisper in 150ms!
+    if (!textToSubmit && audioBlob && audioBlob.size > 2000) {
+      setIsThinking(true);
+      try {
+        const whisperText = await transcribeAudio(audioBlob);
+        if (whisperText.trim()) {
+          textToSubmit = whisperText.trim();
+        }
+      } catch (e) {
+        console.warn('[transcribe] fallback error:', e);
+      }
+    }
+
+    if (!textToSubmit || !sessionId || isThinkingRef.current) return;
+
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (_) {}
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (_) {}
+    }
+
+    accumulatedSpeechRef.current = '';
+    setInterimTranscript('');
+    setIsCandidateSpeaking(false);
+    setIsThinking(true);
+
+    // Record candidate turn in local ledger
+    const candRecord: TurnRecord = {
+      id: `cand_${Date.now()}`,
+      speaker: 'candidate',
+      text: textToSubmit,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      questionIndex: currentQuestionIndex,
+    };
+    setTurns(prev => [...prev, candRecord]);
+
+    try {
+      const res = await sendInterviewTurn({
+        session_id: sessionId,
+        candidate_text: textToSubmit,
+        persona_id: persona?.id || 'alex',
+      });
+
+      setIsThinking(false);
+
+      // Record interviewer turn in local ledger
+      const interviewerRecord: TurnRecord = {
+        id: `ai_${Date.now()}`,
+        speaker: 'interviewer',
+        text: res.interviewer_text,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        questionIndex: res.question_index,
+      };
+      setTurns(prev => [...prev, interviewerRecord]);
+
+      if (res.total_questions) setTotalQuestions(res.total_questions);
+      setCurrentQuestionIndex(res.question_index);
+      if (res.current_question_text) setCurrentQuestionText(res.current_question_text);
+
+      if (res.is_finished) {
+        setIsConcluded(true);
+        speakUtterance(res.interviewer_text);
+      } else {
+        // Speak interviewer reply, then re-open candidate microphone
+        speakUtterance(res.interviewer_text, () => {
+          startListeningRef.current();
+        });
+      }
+    } catch (err: any) {
+      console.error('[interview] Turn transmission error:', err);
+      setIsThinking(false);
+      const fallbackReply = "Understood. Let's explore the architectural trade-offs and edge failure modes.";
+      speakUtterance(fallbackReply, () => {
+        startListeningRef.current();
+      });
+    }
+  }, [sessionId, currentQuestionIndex, persona, speakUtterance]);
+
+  handleCandidateSubmitRef.current = handleCandidateSubmit;
+
+  // Start Candidate Listening (Dual-Path STT: SpeechRecognition + MediaRecorder Whisper)
   const startListening = useCallback(() => {
     if (isAgentSpeakingRef.current || isConcludedRef.current || micMutedRef.current) return;
     if (typeof window === 'undefined') return;
 
+    accumulatedSpeechRef.current = '';
+    setInterimTranscript('');
+    setIsCandidateSpeaking(false);
+
+    // 1. Start MediaRecorder for backup audio recording
+    if (mediaStreamRef.current && mediaStreamRef.current.active) {
+      try {
+        recordedChunksRef.current = [];
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : 'audio/webm';
+        const recorder = new MediaRecorder(mediaStreamRef.current, { mimeType });
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            recordedChunksRef.current.push(e.data);
+          }
+        };
+        recorder.start(250);
+        mediaRecorderRef.current = recorder;
+      } catch (err) {
+        console.warn('[mediaRecorder] start failed:', err);
+      }
+    }
+
+    // 2. Start Web Speech API SpeechRecognition
     const SpeechRecognitionClass =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognitionClass) {
-      console.warn('[speechRecognition] Web Speech API not supported in this browser.');
+      console.warn('[speechRecognition] Web Speech API not supported.');
       return;
     }
 
-    // Stop prior instance if active
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -260,14 +460,14 @@ function RoomControls({
         setInterimTranscript(liveText);
         setIsCandidateSpeaking(liveText.length > 0);
 
-        // Auto-silence submission timer (cadence tuned to persona pause tolerance ~2.2s)
+        // Auto-silence timer: ~2.2s after last spoken word
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         const pauseToleranceMs = (persona?.pause_tolerance || 2.4) * 1000;
 
         silenceTimerRef.current = setTimeout(() => {
           const answerToSend = (accumulatedSpeechRef.current + ' ' + interim).trim();
-          if (answerToSend.length >= 6) {
-            handleCandidateSubmit(answerToSend);
+          if (answerToSend.length >= 4) {
+            handleCandidateSubmitRef.current(answerToSend);
           }
         }, pauseToleranceMs);
       };
@@ -275,14 +475,14 @@ function RoomControls({
       recognition.onerror = (event: any) => {
         if (event.error === 'no-speech') return;
         if (event.error === 'not-allowed') {
-          console.warn('[speechRecognition] microphone permission blocked');
+          console.warn('[speechRecognition] mic blocked');
         }
       };
 
       recognition.onend = () => {
         setIsCandidateSpeaking(false);
-        // Automatically restart listening if still in active listening phase
-        if (!isAgentSpeakingRef.current && !isConcludedRef.current && !micMutedRef.current) {
+        // Automatically restart listening if still in active turn
+        if (!isAgentSpeakingRef.current && !isConcludedRef.current && !micMutedRef.current && !isThinkingRef.current) {
           try {
             recognition.start();
           } catch (_) {}
@@ -296,76 +496,9 @@ function RoomControls({
     }
   }, [persona]);
 
-  // Turn submission handler
-  const handleCandidateSubmit = useCallback(async (spokenText: string) => {
-    const textToSubmit = spokenText.trim();
-    if (!textToSubmit || !sessionId || isThinking) return;
+  startListeningRef.current = startListening;
 
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (_) {}
-    }
-
-    accumulatedSpeechRef.current = '';
-    setInterimTranscript('');
-    setIsCandidateSpeaking(false);
-    setIsThinking(true);
-
-    // Record candidate turn in local UI
-    const candRecord: TurnRecord = {
-      id: `cand_${Date.now()}`,
-      speaker: 'candidate',
-      text: textToSubmit,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      questionIndex: currentQuestionIndex,
-    };
-    setTurns(prev => [...prev, candRecord]);
-
-    try {
-      const res = await sendInterviewTurn({
-        session_id: sessionId,
-        candidate_text: textToSubmit,
-        persona_id: persona?.id || 'alex',
-      });
-
-      setIsThinking(false);
-
-      // Record interviewer turn in local UI
-      const interviewerRecord: TurnRecord = {
-        id: `ai_${Date.now()}`,
-        speaker: 'interviewer',
-        text: res.interviewer_text,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        questionIndex: res.question_index,
-      };
-      setTurns(prev => [...prev, interviewerRecord]);
-
-      if (res.total_questions) setTotalQuestions(res.total_questions);
-      setCurrentQuestionIndex(res.question_index);
-      if (res.current_question_text) setCurrentQuestionText(res.current_question_text);
-
-      if (res.is_finished) {
-        setIsConcluded(true);
-        speakUtterance(res.interviewer_text);
-      } else {
-        // Speak interviewer reply, then re-open candidate microphone
-        speakUtterance(res.interviewer_text, () => {
-          startListening();
-        });
-      }
-    } catch (err: any) {
-      console.error('[interview] Turn transmission error:', err);
-      setIsThinking(false);
-      const fallbackReply = "I noted that point. Let's dig deeper into the system trade-offs and edge failure modes.";
-      speakUtterance(fallbackReply, () => {
-        startListening();
-      });
-    }
-  }, [sessionId, isThinking, currentQuestionIndex, persona, speakUtterance, startListening]);
-
-  // Initial greeting trigger on mount
+  // Initial Greeting Delivery on Mount
   useEffect(() => {
     if (hasStarted || !sessionId) return;
     setHasStarted(true);
@@ -397,17 +530,16 @@ function RoomControls({
         };
         setTurns([greetingRecord]);
 
-        // Speak greeting aloud immediately
+        // Speak greeting aloud, then immediately open candidate microphone
         speakUtterance(res.interviewer_text, () => {
-          // As soon as greeting finishes speaking, candidate mic opens!
-          startListening();
+          startListeningRef.current();
         });
       } catch (err) {
         console.error('[interview] Failed to start session greeting:', err);
         setIsThinking(false);
         const fallbackGreeting = `Hi ${participantName || 'there'}! I'm ${persona?.name || 'Alex Rivera'}, ready for your ${targetCompany || ''} interview. To begin, could you briefly introduce yourself?`;
         speakUtterance(fallbackGreeting, () => {
-          startListening();
+          startListeningRef.current();
         });
       }
     };
@@ -415,6 +547,7 @@ function RoomControls({
     initGreeting();
 
     return () => {
+      if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (recognitionRef.current) {
         try {
@@ -425,17 +558,17 @@ function RoomControls({
         window.speechSynthesis.cancel();
       }
     };
-  }, [sessionId, hasStarted, persona, targetCompany, targetRole, seniority, participantName, speakUtterance, startListening]);
+  }, [sessionId, hasStarted, persona, targetCompany, targetRole, seniority, participantName, speakUtterance]);
 
-  // Mic toggle handler
-  const toggleMic = async () => {
+  // Mic Toggle Handler
+  const toggleMic = () => {
     const nextMuted = !micMuted;
     setMicMuted(nextMuted);
 
-    if (localParticipant) {
-      try {
-        await localParticipant.setMicrophoneEnabled(!nextMuted);
-      } catch (_) {}
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = !nextMuted;
+      });
     }
 
     if (nextMuted) {
@@ -444,26 +577,37 @@ function RoomControls({
           recognitionRef.current.stop();
         } catch (_) {}
       }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (_) {}
+      }
       setIsCandidateSpeaking(false);
     } else {
       if (!isAgentSpeakingRef.current && !isConcludedRef.current) {
-        startListening();
+        startListeningRef.current();
       }
     }
   };
 
-  // Manual submission handler
+  // Explicit Candidate Submit Trigger
+  const triggerManualSubmit = () => {
+    const candidateText = (accumulatedSpeechRef.current + ' ' + interimTranscript).trim();
+    if (candidateText.length >= 2) {
+      handleCandidateSubmit(candidateText);
+    } else if (recordedChunksRef.current.length > 0) {
+      const audioBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
+      handleCandidateSubmit('', audioBlob);
+    }
+  };
+
+  // Manual Typed Text Submit
   const handleManualSend = () => {
     if (!manualText.trim()) return;
     const text = manualText.trim();
     setManualText('');
     setShowManualInput(false);
     handleCandidateSubmit(text);
-  };
-
-  // Test / Unlock Audio helper
-  const handleTestAudio = () => {
-    speakUtterance(`Sound output calibrated for ${persona?.name || 'interviewer'}.`);
   };
 
   return (
@@ -486,7 +630,7 @@ function RoomControls({
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: persona?.accent_color || '#818cf8', textTransform: 'uppercase' }}>
-              Full-Duplex Voice Studio
+              Direct Voice Studio
             </span>
             <span style={{ color: '#475569' }}>•</span>
             <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace" }}>
@@ -502,7 +646,7 @@ function RoomControls({
           <LatencyTelemetry
             isCallActive={true}
             isAgentSpeaking={isAgentSpeaking}
-            isCandidateSpeaking={isCandidateSpeaking}
+            isCandidateSpeaking={isCandidateSpeaking || audioVolume > 15}
             currentTurnCount={turns.length}
           />
           <div style={{
@@ -518,7 +662,7 @@ function RoomControls({
             fontWeight: 600,
           }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 10px #10b981' }} />
-            Connected
+            Chamber Online
           </div>
           <div style={{
             display: 'flex',
@@ -533,7 +677,7 @@ function RoomControls({
             fontWeight: 600,
           }}>
             <ShieldCheck size={14} />
-            Ledger Active
+            SHA-256 Ledger
           </div>
         </div>
       </div>
@@ -589,39 +733,21 @@ function RoomControls({
           </div>
         )}
 
-        {/* Audio unlock helper pill */}
-        <button
-          onClick={handleTestAudio}
-          type="button"
-          style={{
-            position: 'absolute',
-            top: 14,
-            right: 16,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 10px',
-            background: 'rgba(255, 255, 255, 0.04)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: 99,
-            fontSize: 11,
-            color: '#94a3b8',
-            cursor: 'pointer',
-            zIndex: 3,
-          }}
-          title="Test or unmute browser speech audio"
-        >
-          <Volume2 size={13} color={persona?.accent_color || '#818cf8'} />
-          <span>Test Audio</span>
-        </button>
-
         {/* Dynamic Glow Halo */}
         <motion.div
           animate={{
-            scale: isAgentSpeaking ? [1, 1.35, 1.05, 1.25, 1] : isCandidateSpeaking ? [1, 1.15, 1] : [1, 1.05, 1],
-            opacity: isAgentSpeaking ? [0.55, 0.9, 0.55] : isCandidateSpeaking ? [0.4, 0.65, 0.4] : [0.15, 0.25, 0.15],
+            scale: isAgentSpeaking
+              ? [1, 1.35, 1.05, 1.25, 1]
+              : (isCandidateSpeaking || audioVolume > 15)
+              ? [1, 1.2, 1]
+              : [1, 1.05, 1],
+            opacity: isAgentSpeaking
+              ? [0.55, 0.9, 0.55]
+              : (isCandidateSpeaking || audioVolume > 15)
+              ? [0.45, 0.75, 0.45]
+              : [0.15, 0.25, 0.15],
           }}
-          transition={{ duration: isAgentSpeaking ? 1.6 : 2.5, repeat: Infinity, ease: 'easeInOut' }}
+          transition={{ duration: isAgentSpeaking ? 1.6 : 2.0, repeat: Infinity, ease: 'easeInOut' }}
           style={{
             position: 'absolute',
             width: 240,
@@ -629,7 +755,7 @@ function RoomControls({
             borderRadius: '50%',
             background: isAgentSpeaking
               ? `radial-gradient(circle, ${persona?.accent_color || '#6366f1'} 0%, transparent 70%)`
-              : isCandidateSpeaking
+              : (isCandidateSpeaking || audioVolume > 15)
               ? 'radial-gradient(circle, #f43f5e 0%, transparent 70%)'
               : 'radial-gradient(circle, #3b82f6 0%, transparent 70%)',
             filter: 'blur(35px)',
@@ -647,8 +773,8 @@ function RoomControls({
               : [1, 1.02, 1],
             boxShadow: isAgentSpeaking
               ? `0 0 40px ${persona?.accent_color || 'rgba(99, 102, 241, 0.85)'}`
-              : isCandidateSpeaking
-              ? '0 0 35px rgba(244, 63, 94, 0.7)'
+              : (isCandidateSpeaking || audioVolume > 15)
+              ? '0 0 35px rgba(244, 63, 94, 0.75)'
               : '0 0 20px rgba(59, 130, 246, 0.3)',
           }}
           transition={{ duration: isAgentSpeaking ? 0.9 : 2.4, repeat: Infinity }}
@@ -686,7 +812,7 @@ function RoomControls({
             borderRadius: 99,
             background: isAgentSpeaking
               ? 'rgba(99, 102, 241, 0.25)'
-              : isCandidateSpeaking
+              : (isCandidateSpeaking || audioVolume > 15)
               ? 'rgba(244, 63, 94, 0.25)'
               : isThinking
               ? 'rgba(245, 158, 11, 0.25)'
@@ -695,7 +821,7 @@ function RoomControls({
               : 'rgba(255, 255, 255, 0.08)',
             border: isAgentSpeaking
               ? `1px solid ${persona?.accent_color || '#6366f1'}`
-              : isCandidateSpeaking
+              : (isCandidateSpeaking || audioVolume > 15)
               ? '1px solid #f43f5e'
               : isThinking
               ? '1px solid #f59e0b'
@@ -704,7 +830,7 @@ function RoomControls({
               : '1px solid rgba(255, 255, 255, 0.15)',
             color: isAgentSpeaking
               ? '#c7d2fe'
-              : isCandidateSpeaking
+              : (isCandidateSpeaking || audioVolume > 15)
               ? '#fecdd3'
               : isThinking
               ? '#fde68a'
@@ -718,11 +844,11 @@ function RoomControls({
               ? `⚡ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS EVALUATING...`
               : isAgentSpeaking
               ? `🎙️ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS SPEAKING`
-              : isCandidateSpeaking
-              ? '🗣️ CANDIDATE SPEAKING'
+              : (isCandidateSpeaking || audioVolume > 15)
+              ? '🗣️ CANDIDATE SPEAKING (MICROPHONE ACTIVE)'
               : micMuted
               ? '🔇 MICROPHONE MUTED'
-              : `👂 ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS LISTENING`}
+              : `👂 ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS LISTENING · SPEAK NOW`}
           </span>
 
           <p style={{ fontSize: 13, color: '#94a3b8', margin: '8px 0 0', maxWidth: 520 }}>
@@ -730,7 +856,7 @@ function RoomControls({
               ? 'You have completed all technical questions! Click "End Interview & Evaluate" below to view your dossier.'
               : isAgentSpeaking
               ? (turns[turns.length - 1]?.text ? `"${turns[turns.length - 1].text.slice(0, 110)}..."` : 'Listening carefully to your technical rationale.')
-              : isCandidateSpeaking
+              : (isCandidateSpeaking || audioVolume > 15)
               ? 'Speak naturally. When you finish, pause for 2 seconds or click "Send Answer".'
               : persona
               ? `${persona.tagline || persona.signature_phrase}`
@@ -757,29 +883,36 @@ function RoomControls({
           )}
         </div>
 
-        {/* Audio Reactive Pulse Bars */}
+        {/* Audio Reactive Pulse Bars (Connected to real Web Audio Analyser!) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 20, height: 36, zIndex: 2 }}>
-          {[14, 26, 38, 22, 34, 18, 30, 42, 24, 16, 32, 20].map((baseH, idx) => (
-            <motion.div
-              key={idx}
-              animate={{
-                height: (isAgentSpeaking || isCandidateSpeaking) ? [baseH * 0.35, baseH * 1.35, baseH * 0.45] : 6,
-                background: isAgentSpeaking
-                  ? (persona?.accent_color || '#818cf8')
-                  : isCandidateSpeaking
-                  ? '#f43f5e'
-                  : 'rgba(255,255,255,0.15)',
-              }}
-              transition={{ duration: 0.35 + (idx % 4) * 0.1, repeat: Infinity, ease: 'easeInOut' }}
-              style={{ width: 5, borderRadius: 99 }}
-            />
-          ))}
+          {[14, 26, 38, 22, 34, 18, 30, 42, 24, 16, 32, 20].map((baseH, idx) => {
+            const dynamicScale = audioVolume > 5 ? Math.min(1.8, 0.3 + (audioVolume / 45)) : 0.25;
+            return (
+              <motion.div
+                key={idx}
+                animate={{
+                  height: isAgentSpeaking
+                    ? [baseH * 0.35, baseH * 1.35, baseH * 0.45]
+                    : audioVolume > 10
+                    ? [baseH * dynamicScale, baseH * (dynamicScale * 1.3), baseH * dynamicScale * 0.8]
+                    : 6,
+                  background: isAgentSpeaking
+                    ? (persona?.accent_color || '#818cf8')
+                    : (isCandidateSpeaking || audioVolume > 12)
+                    ? '#f43f5e'
+                    : 'rgba(255,255,255,0.15)',
+                }}
+                transition={{ duration: 0.25 + (idx % 4) * 0.08, repeat: Infinity, ease: 'easeInOut' }}
+                style={{ width: 5, borderRadius: 99 }}
+              />
+            );
+          })}
         </div>
       </div>
 
       {/* Live Interim Transcript Bubble (Candidate voice feedback) */}
       <AnimatePresence>
-        {interimTranscript && (
+        {(interimTranscript || audioVolume > 15) && !isAgentSpeaking && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -788,7 +921,7 @@ function RoomControls({
               padding: '12px 18px',
               borderRadius: 14,
               background: 'rgba(244, 63, 94, 0.08)',
-              border: '1px solid rgba(244, 63, 94, 0.25)',
+              border: '1px solid rgba(244, 63, 94, 0.3)',
               color: '#fecdd3',
               fontSize: 13,
               lineHeight: 1.5,
@@ -801,12 +934,14 @@ function RoomControls({
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f43f5e', flexShrink: 0, boxShadow: '0 0 8px #f43f5e' }} />
               <div>
-                <strong style={{ color: '#fff', marginRight: 6 }}>Hearing you say:</strong>
-                <span>"{interimTranscript}"</span>
+                <strong style={{ color: '#fff', marginRight: 6 }}>
+                  {interimTranscript ? 'Hearing you say:' : 'Hearing microphone audio...'}
+                </strong>
+                <span>{interimTranscript ? `"${interimTranscript}"` : 'Listening to your response...'}</span>
               </div>
             </div>
             <button
-              onClick={() => handleCandidateSubmit(interimTranscript)}
+              onClick={triggerManualSubmit}
               type="button"
               style={{
                 background: '#f43f5e',
@@ -912,6 +1047,29 @@ function RoomControls({
             <span>{!micMuted ? 'Mute Mic' : 'Unmute Mic'}</span>
           </button>
 
+          {/* Explicit Send Answer Button */}
+          <button
+            onClick={triggerManualSubmit}
+            disabled={isAgentSpeaking || isThinking}
+            type="button"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '11px 18px',
+              borderRadius: 99,
+              border: '1px solid rgba(244, 63, 94, 0.4)',
+              background: 'rgba(244, 63, 94, 0.15)',
+              color: '#fda4af',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: isAgentSpeaking || isThinking ? 'not-allowed' : 'pointer',
+              opacity: isAgentSpeaking || isThinking ? 0.5 : 1,
+            }}
+          >
+            <span>🎙️ Send Answer</span>
+          </button>
+
           {/* Type instead toggle */}
           <button
             onClick={() => setShowManualInput(!showManualInput)}
@@ -958,6 +1116,7 @@ function RoomControls({
         {/* End & Evaluate Button */}
         <button
           onClick={() => {
+            if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             if (recognitionRef.current) {
               try {
@@ -967,7 +1126,9 @@ function RoomControls({
             if (typeof window !== 'undefined' && window.speechSynthesis) {
               window.speechSynthesis.cancel();
             }
-            room.disconnect();
+            if (mediaStreamRef.current) {
+              mediaStreamRef.current.getTracks().forEach(t => t.stop());
+            }
             onLeave();
           }}
           type="button"
@@ -1062,45 +1223,4 @@ function RoomControls({
   );
 }
 
-function LiveKitRoomWrapperComponent({
-  token,
-  serverUrl,
-  onLeave,
-  sessionTitle,
-  persona,
-  sessionId,
-  targetCompany,
-  targetRole,
-  seniority,
-  participantName,
-}: LiveKitRoomWrapperProps) {
-  return (
-    <LiveKitRoom
-      token={token}
-      serverUrl={serverUrl}
-      connect={true}
-      audio={true}
-      video={false}
-      onDisconnected={(reason) => {
-        console.warn('[livekit] Room event disconnected:', reason);
-      }}
-      data-lk-theme="default"
-    >
-      <RoomAudioRenderer />
-      <StartAudio label="🔊 Click to enable audio playback" />
-      <RoomControls
-        onLeave={onLeave}
-        sessionTitle={sessionTitle}
-        persona={persona}
-        sessionId={sessionId}
-        targetCompany={targetCompany}
-        targetRole={targetRole}
-        seniority={seniority}
-        participantName={participantName}
-      />
-    </LiveKitRoom>
-  );
-}
-
-const LiveKitRoomWrapper = React.memo(LiveKitRoomWrapperComponent);
-export default LiveKitRoomWrapper;
+export default React.memo(LiveKitRoomWrapper);

@@ -48,6 +48,10 @@ from backend.services.evaluation_service import evaluation_service
 from backend.services.ledger_service import ledger_service
 from backend.services import chat_service
 from livekit import api as livekit_api
+from groq import AsyncGroq
+
+_groq_api_key = os.getenv("GROQ_API_KEY")
+_groq_client = AsyncGroq(api_key=_groq_api_key) if _groq_api_key else None
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
@@ -437,6 +441,39 @@ async def interview_chat_endpoint(req: ChatTurnRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Interview turn processing failed: {str(e)}"
         )
+
+
+@app.post(
+    "/api/interview/transcribe",
+    summary="Transcribe candidate audio blob using Groq Whisper (~150ms)",
+    tags=["Interview Chat"],
+)
+async def transcribe_audio_endpoint(file: UploadFile = File(...)):
+    """
+    Direct ultra-low-latency speech-to-text via Groq Whisper.
+    Accepts webm, wav, mp4, ogg, or mp3 recorded directly from the browser.
+    """
+    try:
+        content = await file.read()
+        if not content or len(content) < 100:
+            return {"text": ""}
+        if not _groq_client:
+            return {"text": ""}
+
+        filename = file.filename or "candidate_speech.webm"
+        transcription = await _groq_client.audio.transcriptions.create(
+            file=(filename, content),
+            model="whisper-large-v3-turbo",
+            response_format="json",
+            language="en",
+            temperature=0.0,
+        )
+        result_text = transcription.text.strip() if hasattr(transcription, "text") else str(transcription).strip()
+        logger.info("[api] Whisper transcribed %d bytes -> '%s'", len(content), result_text[:60])
+        return {"text": result_text}
+    except Exception as e:
+        logger.error("[api] Whisper audio transcription error: %s", e)
+        return {"text": ""}
 
 
 # ─── Evaluation & Turn Ledger Endpoints ───────────────────────────────────────

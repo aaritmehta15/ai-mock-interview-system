@@ -281,6 +281,21 @@ export const sendInterviewTurn = (payload: {
   persona_id?: string;
 }): Promise<InterviewChatResponse> => api.post('/api/interview/chat', payload).then(r => r.data);
 
+export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'candidate_voice.webm');
+  try {
+    const res = await api.post('/api/interview/transcribe', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 15_000,
+    });
+    return res.data?.text || '';
+  } catch (err) {
+    console.warn('[api] Audio transcription fallback error:', err);
+    return '';
+  }
+};
+
 export const getHistory = (limit: number = 50, offset: number = 0): Promise<SessionHistoryResponse> =>
   api.get('/api/history', { params: { limit, offset } }).then(r => r.data);
 
