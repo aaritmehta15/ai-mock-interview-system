@@ -286,8 +286,7 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
   formData.append('file', audioBlob, 'candidate_voice.webm');
   try {
     const res = await api.post('/api/interview/transcribe', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 15_000,
+      timeout: 20_000,
     });
     return res.data?.text || '';
   } catch (err) {

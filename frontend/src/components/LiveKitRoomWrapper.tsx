@@ -86,6 +86,7 @@ function LiveKitRoomWrapper({
   const [isAgentSpeaking, setIsAgentSpeaking] = useState<boolean>(false);
   const [isCandidateSpeaking, setIsCandidateSpeaking] = useState<boolean>(false);
   const [isThinking, setIsThinking] = useState<boolean>(false);
+  const [statusMessage, setStatusMessage] = useState<string>('');
   const [interimTranscript, setInterimTranscript] = useState<string>('');
   const [manualText, setManualText] = useState<string>('');
   const [showManualInput, setShowManualInput] = useState<boolean>(false);
@@ -105,19 +106,21 @@ function LiveKitRoomWrapper({
   const recognitionRef = useRef<any>(null);
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const speechSafetyTimerRef = useRef<any>(null);
-  const silenceTimerRef = useRef<any>(null);
   const accumulatedSpeechRef = useRef<string>('');
 
   const isAgentSpeakingRef = useRef<boolean>(false);
   const isConcludedRef = useRef<boolean>(false);
   const micMutedRef = useRef<boolean>(false);
-  const isThinkingRef = useRef<boolean>(false);
+  const isSubmittingRef = useRef<boolean>(false);
   const transcriptBottomRef = useRef<HTMLDivElement>(null);
+
+  // Silence detection tracking
+  const hasSpokenSinceListeningRef = useRef<boolean>(false);
+  const silenceStartTimestampRef = useRef<number | null>(null);
 
   isAgentSpeakingRef.current = isAgentSpeaking;
   isConcludedRef.current = isConcluded;
   micMutedRef.current = micMuted;
-  isThinkingRef.current = isThinking;
 
   // Auto-scroll turn ledger drawer
   useEffect(() => {
@@ -135,6 +138,10 @@ function LiveKitRoomWrapper({
     }, 2000);
     return () => clearInterval(heartbeat);
   }, []);
+
+  // Forward declarations for mutual referencing
+  const startListeningRef = useRef<() => void>(() => {});
+  const submitTurnRef = useRef<(forcedText?: string) => Promise<void>>(async () => {});
 
   // Initialize Microphone & Web Audio Analyser
   useEffect(() => {
@@ -157,7 +164,7 @@ function LiveKitRoomWrapper({
 
         mediaStreamRef.current = stream;
 
-        // Setup real Web Audio Analyser
+        // Setup Web Audio Analyser
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioCtx) {
           const ctx = new AudioCtx();
@@ -168,11 +175,11 @@ function LiveKitRoomWrapper({
           source.connect(analyser);
           analyserRef.current = analyser;
 
-          // Sound level polling loop
+          // Sound level polling loop & silence detection
           const dataArray = new Uint8Array(analyser.frequencyBinCount);
           const checkVolume = () => {
             if (!isMounted) return;
-            if (analyserRef.current && !micMutedRef.current && !isAgentSpeakingRef.current) {
+            if (analyserRef.current && !micMutedRef.current && !isAgentSpeakingRef.current && !isSubmittingRef.current) {
               analyserRef.current.getByteFrequencyData(dataArray);
               let sum = 0;
               for (let i = 0; i < dataArray.length; i++) {
@@ -180,6 +187,23 @@ function LiveKitRoomWrapper({
               }
               const avg = sum / dataArray.length;
               setAudioVolume(avg);
+
+              // Voice Activity Detection (VAD)
+              if (avg > 15) {
+                hasSpokenSinceListeningRef.current = true;
+                silenceStartTimestampRef.current = null;
+                setIsCandidateSpeaking(true);
+              } else if (hasSpokenSinceListeningRef.current) {
+                // Candidate spoke earlier and is now silent
+                if (!silenceStartTimestampRef.current) {
+                  silenceStartTimestampRef.current = Date.now();
+                } else if (Date.now() - silenceStartTimestampRef.current > 2000) {
+                  // 2.0 seconds of silence after speaking -> auto-submit!
+                  silenceStartTimestampRef.current = null;
+                  hasSpokenSinceListeningRef.current = false;
+                  submitTurnRef.current();
+                }
+              }
             } else {
               setAudioVolume(0);
             }
@@ -207,10 +231,6 @@ function LiveKitRoomWrapper({
       }
     };
   }, []);
-
-  // Forward declarations for mutual referencing
-  const startListeningRef = useRef<() => void>(() => {});
-  const handleCandidateSubmitRef = useRef<(text: string, audioBlob?: Blob) => Promise<void>>(async () => {});
 
   // Speak Utterance with Dual Completion Guarantee
   const speakUtterance = useCallback((text: string, onEndCallback?: () => void) => {
@@ -255,7 +275,6 @@ function LiveKitRoomWrapper({
         utterance.rate = 1.0;
       }
 
-      // Calculate speech duration guarantee (avg 2.4 words/sec + 1.2s padding)
       const wordCount = text.split(/\s+/).filter(Boolean).length;
       const estimatedDurationMs = Math.max(2000, (wordCount / 2.3) * 1000 + 1200);
 
@@ -279,7 +298,6 @@ function LiveKitRoomWrapper({
       utterance.onend = completeSpeech;
       utterance.onerror = completeSpeech;
 
-      // Safety timeout: If Chrome's C++ synthesis queue drops onend, force complete cleanly
       speechSafetyTimerRef.current = setTimeout(completeSpeech, estimatedDurationMs);
 
       window.speechSynthesis.speak(utterance);
@@ -293,47 +311,175 @@ function LiveKitRoomWrapper({
     }
   }, [persona]);
 
-  // Candidate Turn Submission Handler
-  const handleCandidateSubmit = useCallback(async (spokenText: string, audioBlob?: Blob) => {
-    let textToSubmit = spokenText.trim();
+  // Start Candidate Listening (Dual-Path STT: SpeechRecognition + MediaRecorder Whisper)
+  const startListening = useCallback(() => {
+    if (isAgentSpeakingRef.current || isConcludedRef.current || micMutedRef.current || isSubmittingRef.current) return;
+    if (typeof window === 'undefined') return;
 
-    // If text is empty but audio blob is available, transcribe via Groq Whisper in 150ms!
-    if (!textToSubmit && audioBlob && audioBlob.size > 2000) {
-      setIsThinking(true);
+    accumulatedSpeechRef.current = '';
+    setInterimTranscript('');
+    setIsCandidateSpeaking(false);
+    hasSpokenSinceListeningRef.current = false;
+    silenceStartTimestampRef.current = null;
+    setStatusMessage('');
+
+    // 1. Start MediaRecorder for guaranteed Whisper backup
+    if (mediaStreamRef.current && mediaStreamRef.current.active) {
       try {
-        const whisperText = await transcribeAudio(audioBlob);
-        if (whisperText.trim()) {
-          textToSubmit = whisperText.trim();
-        }
-      } catch (e) {
-        console.warn('[transcribe] fallback error:', e);
+        recordedChunksRef.current = [];
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : 'audio/webm';
+        const recorder = new MediaRecorder(mediaStreamRef.current, { mimeType });
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            recordedChunksRef.current.push(e.data);
+          }
+        };
+        recorder.start(100);
+        mediaRecorderRef.current = recorder;
+      } catch (err) {
+        console.warn('[mediaRecorder] start failed:', err);
       }
     }
 
-    if (!textToSubmit || !sessionId || isThinkingRef.current) return;
+    // 2. Start Web Speech API SpeechRecognition
+    const SpeechRecognitionClass =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    if (SpeechRecognitionClass) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (_) {}
+      }
+
+      try {
+        const recognition = new SpeechRecognitionClass();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event: any) => {
+          if (isAgentSpeakingRef.current || isSubmittingRef.current) return;
+
+          let interim = '';
+          let finalChunk = '';
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const item = event.results[i];
+            if (item.isFinal) {
+              finalChunk += item[0].transcript + ' ';
+            } else {
+              interim += item[0].transcript;
+            }
+          }
+
+          if (finalChunk) {
+            accumulatedSpeechRef.current = (accumulatedSpeechRef.current + ' ' + finalChunk).trim();
+          }
+
+          const liveText = (accumulatedSpeechRef.current + ' ' + interim).trim();
+          setInterimTranscript(liveText);
+          if (liveText.length > 0) {
+            setIsCandidateSpeaking(true);
+            hasSpokenSinceListeningRef.current = true;
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          if (event.error === 'no-speech') return;
+          console.warn('[speechRecognition] event error:', event.error);
+        };
+
+        recognition.onend = () => {
+          if (!isAgentSpeakingRef.current && !isConcludedRef.current && !micMutedRef.current && !isSubmittingRef.current) {
+            try {
+              recognition.start();
+            } catch (_) {}
+          }
+        };
+
+        recognition.start();
+        recognitionRef.current = recognition;
+      } catch (e) {
+        console.warn('[speechRecognition] error starting recognition:', e);
+      }
+    }
+  }, []);
+
+  startListeningRef.current = startListening;
+
+  // Bulletproof Candidate Turn Submission
+  const submitTurn = useCallback(async (forcedText?: string) => {
+    if (isSubmittingRef.current || !sessionId) return;
+    isSubmittingRef.current = true;
+    setIsThinking(true);
+    setIsCandidateSpeaking(false);
+    setStatusMessage('Capturing your response...');
+
+    // 1. Stop SpeechRecognition
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
       } catch (_) {}
     }
+
+    // 2. Stop MediaRecorder cleanly and collect finalized Blob
+    let finalizedBlob: Blob | null = null;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch (_) {}
+      finalizedBlob = await new Promise<Blob | null>((resolve) => {
+        const rec = mediaRecorderRef.current!;
+        rec.onstop = () => {
+          if (recordedChunksRef.current.length > 0) {
+            resolve(new Blob(recordedChunksRef.current, { type: 'audio/webm' }));
+          } else {
+            resolve(null);
+          }
+        };
+        rec.stop();
+      });
+    } else if (recordedChunksRef.current.length > 0) {
+      finalizedBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
     }
 
+    // 3. Resolve candidate text
+    let candidateText = (forcedText || accumulatedSpeechRef.current || interimTranscript).trim();
+
+    // If text is empty but audio was recorded by microphone, transcribe via Groq Whisper (~150ms)!
+    if (!candidateText && finalizedBlob && finalizedBlob.size > 500) {
+      setStatusMessage('Transcribing speech via Groq Whisper (~150ms)...');
+      try {
+        const whisperResult = await transcribeAudio(finalizedBlob);
+        if (whisperResult && whisperResult.trim()) {
+          candidateText = whisperResult.trim();
+        }
+      } catch (err) {
+        console.warn('[whisper] transcription error:', err);
+      }
+    }
+
+    // If still no speech detected (e.g., clicked Send Answer without speaking):
+    if (!candidateText) {
+      setStatusMessage('No speech detected. Please speak into your microphone or click "Type Instead".');
+      setIsThinking(false);
+      isSubmittingRef.current = false;
+      setTimeout(() => {
+        startListeningRef.current();
+      }, 1800);
+      return;
+    }
+
+    // Clear live speech display
     accumulatedSpeechRef.current = '';
     setInterimTranscript('');
-    setIsCandidateSpeaking(false);
-    setIsThinking(true);
+    setStatusMessage(`Evaluating with ${persona?.name || 'interviewer'}...`);
 
     // Record candidate turn in local ledger
     const candRecord: TurnRecord = {
       id: `cand_${Date.now()}`,
       speaker: 'candidate',
-      text: textToSubmit,
+      text: candidateText,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       questionIndex: currentQuestionIndex,
     };
@@ -342,21 +488,23 @@ function LiveKitRoomWrapper({
     try {
       const res = await sendInterviewTurn({
         session_id: sessionId,
-        candidate_text: textToSubmit,
+        candidate_text: candidateText,
         persona_id: persona?.id || 'alex',
       });
 
       setIsThinking(false);
+      isSubmittingRef.current = false;
+      setStatusMessage('');
 
       // Record interviewer turn in local ledger
-      const interviewerRecord: TurnRecord = {
+      const aiRecord: TurnRecord = {
         id: `ai_${Date.now()}`,
         speaker: 'interviewer',
         text: res.interviewer_text,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         questionIndex: res.question_index,
       };
-      setTurns(prev => [...prev, interviewerRecord]);
+      setTurns(prev => [...prev, aiRecord]);
 
       if (res.total_questions) setTotalQuestions(res.total_questions);
       setCurrentQuestionIndex(res.question_index);
@@ -371,132 +519,19 @@ function LiveKitRoomWrapper({
           startListeningRef.current();
         });
       }
-    } catch (err: any) {
-      console.error('[interview] Turn transmission error:', err);
+    } catch (err) {
+      console.error('[interview] Turn transmission failed:', err);
       setIsThinking(false);
-      const fallbackReply = "Understood. Let's explore the architectural trade-offs and edge failure modes.";
+      isSubmittingRef.current = false;
+      setStatusMessage('');
+      const fallbackReply = "That's an interesting point. Let's dig deeper into the system trade-offs and failure modes.";
       speakUtterance(fallbackReply, () => {
         startListeningRef.current();
       });
     }
-  }, [sessionId, currentQuestionIndex, persona, speakUtterance]);
+  }, [sessionId, currentQuestionIndex, persona, interimTranscript, speakUtterance]);
 
-  handleCandidateSubmitRef.current = handleCandidateSubmit;
-
-  // Start Candidate Listening (Dual-Path STT: SpeechRecognition + MediaRecorder Whisper)
-  const startListening = useCallback(() => {
-    if (isAgentSpeakingRef.current || isConcludedRef.current || micMutedRef.current) return;
-    if (typeof window === 'undefined') return;
-
-    accumulatedSpeechRef.current = '';
-    setInterimTranscript('');
-    setIsCandidateSpeaking(false);
-
-    // 1. Start MediaRecorder for backup audio recording
-    if (mediaStreamRef.current && mediaStreamRef.current.active) {
-      try {
-        recordedChunksRef.current = [];
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm';
-        const recorder = new MediaRecorder(mediaStreamRef.current, { mimeType });
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            recordedChunksRef.current.push(e.data);
-          }
-        };
-        recorder.start(250);
-        mediaRecorderRef.current = recorder;
-      } catch (err) {
-        console.warn('[mediaRecorder] start failed:', err);
-      }
-    }
-
-    // 2. Start Web Speech API SpeechRecognition
-    const SpeechRecognitionClass =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognitionClass) {
-      console.warn('[speechRecognition] Web Speech API not supported.');
-      return;
-    }
-
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (_) {}
-    }
-
-    try {
-      const recognition = new SpeechRecognitionClass();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      recognition.onstart = () => {
-        setIsCandidateSpeaking(false);
-      };
-
-      recognition.onresult = (event: any) => {
-        if (isAgentSpeakingRef.current) return;
-
-        let interim = '';
-        let finalChunk = '';
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const item = event.results[i];
-          if (item.isFinal) {
-            finalChunk += item[0].transcript + ' ';
-          } else {
-            interim += item[0].transcript;
-          }
-        }
-
-        if (finalChunk) {
-          accumulatedSpeechRef.current = (accumulatedSpeechRef.current + ' ' + finalChunk).trim();
-        }
-
-        const liveText = (accumulatedSpeechRef.current + ' ' + interim).trim();
-        setInterimTranscript(liveText);
-        setIsCandidateSpeaking(liveText.length > 0);
-
-        // Auto-silence timer: ~2.2s after last spoken word
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-        const pauseToleranceMs = (persona?.pause_tolerance || 2.4) * 1000;
-
-        silenceTimerRef.current = setTimeout(() => {
-          const answerToSend = (accumulatedSpeechRef.current + ' ' + interim).trim();
-          if (answerToSend.length >= 4) {
-            handleCandidateSubmitRef.current(answerToSend);
-          }
-        }, pauseToleranceMs);
-      };
-
-      recognition.onerror = (event: any) => {
-        if (event.error === 'no-speech') return;
-        if (event.error === 'not-allowed') {
-          console.warn('[speechRecognition] mic blocked');
-        }
-      };
-
-      recognition.onend = () => {
-        setIsCandidateSpeaking(false);
-        // Automatically restart listening if still in active turn
-        if (!isAgentSpeakingRef.current && !isConcludedRef.current && !micMutedRef.current && !isThinkingRef.current) {
-          try {
-            recognition.start();
-          } catch (_) {}
-        }
-      };
-
-      recognition.start();
-      recognitionRef.current = recognition;
-    } catch (e) {
-      console.warn('[speechRecognition] error starting recognition:', e);
-    }
-  }, [persona]);
-
-  startListeningRef.current = startListening;
+  submitTurnRef.current = submitTurn;
 
   // Initial Greeting Delivery on Mount
   useEffect(() => {
@@ -506,6 +541,7 @@ function LiveKitRoomWrapper({
     const initGreeting = async () => {
       try {
         setIsThinking(true);
+        setStatusMessage('Connecting to interviewer persona...');
         const res = await startInterviewSession({
           session_id: sessionId,
           persona_id: persona?.id || 'alex',
@@ -516,6 +552,7 @@ function LiveKitRoomWrapper({
         });
 
         setIsThinking(false);
+        setStatusMessage('');
 
         if (res.total_questions) setTotalQuestions(res.total_questions);
         if (res.current_question_text) setCurrentQuestionText(res.current_question_text);
@@ -537,6 +574,7 @@ function LiveKitRoomWrapper({
       } catch (err) {
         console.error('[interview] Failed to start session greeting:', err);
         setIsThinking(false);
+        setStatusMessage('');
         const fallbackGreeting = `Hi ${participantName || 'there'}! I'm ${persona?.name || 'Alex Rivera'}, ready for your ${targetCompany || ''} interview. To begin, could you briefly introduce yourself?`;
         speakUtterance(fallbackGreeting, () => {
           startListeningRef.current();
@@ -548,7 +586,6 @@ function LiveKitRoomWrapper({
 
     return () => {
       if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
@@ -590,24 +627,13 @@ function LiveKitRoomWrapper({
     }
   };
 
-  // Explicit Candidate Submit Trigger
-  const triggerManualSubmit = () => {
-    const candidateText = (accumulatedSpeechRef.current + ' ' + interimTranscript).trim();
-    if (candidateText.length >= 2) {
-      handleCandidateSubmit(candidateText);
-    } else if (recordedChunksRef.current.length > 0) {
-      const audioBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-      handleCandidateSubmit('', audioBlob);
-    }
-  };
-
   // Manual Typed Text Submit
   const handleManualSend = () => {
     if (!manualText.trim()) return;
     const text = manualText.trim();
     setManualText('');
     setShowManualInput(false);
-    handleCandidateSubmit(text);
+    submitTurn(text);
   };
 
   return (
@@ -841,7 +867,7 @@ function LiveKitRoomWrapper({
             {isConcluded
               ? '🏁 INTERVIEW COMPLETE · READY TO EVALUATE'
               : isThinking
-              ? `⚡ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS EVALUATING...`
+              ? (statusMessage || `⚡ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS EVALUATING...`)
               : isAgentSpeaking
               ? `🎙️ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS SPEAKING`
               : (isCandidateSpeaking || audioVolume > 15)
@@ -854,6 +880,8 @@ function LiveKitRoomWrapper({
           <p style={{ fontSize: 13, color: '#94a3b8', margin: '8px 0 0', maxWidth: 520 }}>
             {isConcluded
               ? 'You have completed all technical questions! Click "End Interview & Evaluate" below to view your dossier.'
+              : statusMessage
+              ? statusMessage
               : isAgentSpeaking
               ? (turns[turns.length - 1]?.text ? `"${turns[turns.length - 1].text.slice(0, 110)}..."` : 'Listening carefully to your technical rationale.')
               : (isCandidateSpeaking || audioVolume > 15)
@@ -912,7 +940,7 @@ function LiveKitRoomWrapper({
 
       {/* Live Interim Transcript Bubble (Candidate voice feedback) */}
       <AnimatePresence>
-        {(interimTranscript || audioVolume > 15) && !isAgentSpeaking && (
+        {(interimTranscript || audioVolume > 15 || statusMessage) && !isAgentSpeaking && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -935,27 +963,28 @@ function LiveKitRoomWrapper({
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f43f5e', flexShrink: 0, boxShadow: '0 0 8px #f43f5e' }} />
               <div>
                 <strong style={{ color: '#fff', marginRight: 6 }}>
-                  {interimTranscript ? 'Hearing you say:' : 'Hearing microphone audio...'}
+                  {interimTranscript ? 'Hearing you say:' : statusMessage ? 'Status:' : 'Microphone audio active:'}
                 </strong>
-                <span>{interimTranscript ? `"${interimTranscript}"` : 'Listening to your response...'}</span>
+                <span>{interimTranscript ? `"${interimTranscript}"` : statusMessage || 'Listening to your response...'}</span>
               </div>
             </div>
             <button
-              onClick={triggerManualSubmit}
+              onClick={() => submitTurn()}
+              disabled={isThinking || isAgentSpeaking}
               type="button"
               style={{
-                background: '#f43f5e',
+                background: isThinking ? '#64748b' : '#f43f5e',
                 border: 'none',
                 borderRadius: 8,
                 padding: '6px 14px',
                 color: '#fff',
                 fontSize: 12,
                 fontWeight: 700,
-                cursor: 'pointer',
+                cursor: isThinking ? 'not-allowed' : 'pointer',
                 flexShrink: 0,
               }}
             >
-              Send Answer
+              {isThinking ? 'Processing...' : 'Send Answer'}
             </button>
           </motion.div>
         )}
@@ -1049,7 +1078,7 @@ function LiveKitRoomWrapper({
 
           {/* Explicit Send Answer Button */}
           <button
-            onClick={triggerManualSubmit}
+            onClick={() => submitTurn()}
             disabled={isAgentSpeaking || isThinking}
             type="button"
             style={{
@@ -1067,7 +1096,8 @@ function LiveKitRoomWrapper({
               opacity: isAgentSpeaking || isThinking ? 0.5 : 1,
             }}
           >
-            <span>🎙️ Send Answer</span>
+            <Send size={14} />
+            <span>{isThinking ? 'Evaluating...' : 'Send Answer'}</span>
           </button>
 
           {/* Type instead toggle */}
@@ -1117,7 +1147,6 @@ function LiveKitRoomWrapper({
         <button
           onClick={() => {
             if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
-            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             if (recognitionRef.current) {
               try {
                 recognitionRef.current.stop();
