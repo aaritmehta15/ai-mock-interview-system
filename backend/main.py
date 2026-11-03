@@ -46,6 +46,7 @@ from backend.services.blueprint_service import (
 )
 from backend.services.evaluation_service import evaluation_service
 from backend.services.ledger_service import ledger_service
+from backend.services import chat_service
 from livekit import api as livekit_api
 
 logging.basicConfig(
@@ -132,6 +133,21 @@ class RecordTurnRequest(BaseModel):
     text: str
     question_index: int = 0
     confidence: float = 1.0
+
+
+class StartChatRequest(BaseModel):
+    session_id: str
+    persona_id: Optional[str] = "alex"
+    company: Optional[str] = None
+    role: Optional[str] = None
+    seniority: Optional[str] = None
+    participant_name: Optional[str] = None
+
+
+class ChatTurnRequest(BaseModel):
+    session_id: str
+    candidate_text: str = ""
+    persona_id: Optional[str] = "alex"
 
 
 # ─── System Health & Status Endpoints ─────────────────────────────────────────
@@ -361,6 +377,66 @@ async def generate_token_endpoint(req: TokenRequest):
     )
 
     return TokenResponse(token=token, url=url, server_url=url)
+
+
+# ─── Interactive Voice & Conversational Chat Endpoints ────────────────────────
+
+@app.post(
+    "/api/interview/start",
+    summary="Start interview session and receive customized persona opening greeting",
+    tags=["Interview Chat"],
+)
+async def start_interview_endpoint(req: StartChatRequest):
+    """
+    Initializes the interview chamber, saves active blueprint & metadata,
+    and returns the opening spoken greeting from the selected interviewer persona.
+    """
+    try:
+        res = await chat_service.start_interview_session(
+            session_id=req.session_id,
+            persona_id=req.persona_id or "alex",
+            company=req.company,
+            role=req.role,
+            seniority=req.seniority,
+            participant_name=req.participant_name,
+        )
+        return res
+    except Exception as e:
+        logger.error("[api] start_interview failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start interview: {str(e)}"
+        )
+
+
+@app.post(
+    "/api/interview/chat",
+    summary="Process candidate speech turn and receive AI interviewer spoken reply",
+    tags=["Interview Chat"],
+)
+async def interview_chat_endpoint(req: ChatTurnRequest):
+    """
+    Processes candidate spoken answer, updates SQLite Turn Ledger,
+    and returns AI interviewer's calibrated Socratic reply and next question.
+    """
+    try:
+        if not req.candidate_text or not req.candidate_text.strip():
+            return await chat_service.start_interview_session(
+                session_id=req.session_id,
+                persona_id=req.persona_id or "alex",
+            )
+        res = await chat_service.process_turn(
+            session_id=req.session_id,
+            candidate_text=req.candidate_text,
+            persona_id=req.persona_id or "alex",
+        )
+        return res
+    except Exception as e:
+        logger.error("[api] interview_chat failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Interview turn processing failed: {str(e)}"
+        )
 
 
 # ─── Evaluation & Turn Ledger Endpoints ───────────────────────────────────────

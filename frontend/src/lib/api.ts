@@ -255,6 +255,32 @@ export const recordTurn = (payload: {
   confidence?: number;
 }): Promise<TurnEvent> => api.post('/api/ledger/turn', payload).then(r => r.data);
 
+export interface InterviewChatResponse {
+  session_id: string;
+  interviewer_text: string;
+  stage: string;
+  question_index: number;
+  total_questions?: number;
+  current_question_text?: string;
+  is_finished: boolean;
+  persona?: PersonaProfile;
+}
+
+export const startInterviewSession = (payload: {
+  session_id: string;
+  persona_id?: string;
+  company?: string;
+  role?: string;
+  seniority?: string;
+  participant_name?: string;
+}): Promise<InterviewChatResponse> => api.post('/api/interview/start', payload).then(r => r.data);
+
+export const sendInterviewTurn = (payload: {
+  session_id: string;
+  candidate_text: string;
+  persona_id?: string;
+}): Promise<InterviewChatResponse> => api.post('/api/interview/chat', payload).then(r => r.data);
+
 export const getHistory = (limit: number = 50, offset: number = 0): Promise<SessionHistoryResponse> =>
   api.get('/api/history', { params: { limit, offset } }).then(r => r.data);
 

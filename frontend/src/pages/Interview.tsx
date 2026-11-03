@@ -243,6 +243,11 @@ export default function Interview() {
             sessionTitle={`${targetCompany} ${seniority} Voice Interview`}
             onLeave={handleEndInterview}
             persona={wrapperPersona}
+            sessionId={activeSessionIdRef.current || sessionId}
+            targetCompany={targetCompany}
+            targetRole={targetRole}
+            seniority={seniority}
+            participantName={user?.displayName || 'Staff Candidate'}
           />
         </div>
       ) : (

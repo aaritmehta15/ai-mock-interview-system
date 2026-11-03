@@ -446,10 +446,11 @@ Return ONLY valid JSON matching this schema:
             spotlight_topic=clean_spotlight,
         )
 
+    primary_groq_model = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
     models_to_try = [
+        primary_groq_model,
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
-        os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
     ]
 
     for model in models_to_try:
