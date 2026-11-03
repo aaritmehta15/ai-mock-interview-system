@@ -188,13 +188,17 @@ async def process_turn(
     )
 
     # Determine what question the interviewer should deliver NEXT
-    # If answering_q_idx == 0: candidate just introduced themselves -> next is Question 1 (idx 0)
-    # If answering_q_idx == 1: candidate answered Q1 -> next is Question 2 (idx 1)
+    # If answering_q_idx == 0: candidate just introduced themselves -> next is Question 1 (questions[0])
+    # If answering_q_idx == 1: candidate answered Q1 -> next is Question 2 (questions[1])
     # ...
     # If answering_q_idx >= total_q_count: all questions completed -> conclude!
     is_intro_turn = (answering_q_idx == 0)
     is_final_turn = (answering_q_idx >= total_q_count)
     next_q_idx = min(total_q_count, answering_q_idx + 1) if not is_intro_turn else 1
+
+    just_answered_q = questions[answering_q_idx - 1] if (answering_q_idx > 0 and answering_q_idx - 1 < total_q_count) else None
+    next_to_deliver_q = questions[answering_q_idx] if answering_q_idx < total_q_count else None
+    next_q_num = answering_q_idx + 1
 
     clean_level = bp.seniority.value if hasattr(bp.seniority, "value") else str(bp.seniority)
     system_prompt = compile_persona_instructions(persona, bp, bp.role, clean_level)
@@ -233,29 +237,24 @@ async def process_turn(
         })
     else:
         # Intermediate question turn
-        target_q = questions[answering_q_idx] if answering_q_idx < total_q_count else None
-        next_q = questions[answering_q_idx] if answering_q_idx < total_q_count else None
-        
-        # Check for Conversational Action Triggers (Escalation Probe, Doubt, Nudge)
         probe = ConversationalActionTracker.should_escalate_probe(clean_text, persona)
         doubt = ConversationalActionTracker.should_doubt(clean_text, persona)
 
         if probe and answering_q_idx < total_q_count - 1:
             guidance = (
-                f"Candidate answered. Acknowledge their point in one phrase, then challenge them with this follow-up probe: "
+                f"Candidate answered Question {answering_q_idx}. Acknowledge their point in one phrase, then challenge them with this follow-up probe: "
                 f"\"{probe}\" Keep strictly under 30 words."
             )
         elif doubt and answering_q_idx < total_q_count - 1:
             guidance = (
-                f"Candidate made an absolute statement. Challenge their conviction: "
+                f"Candidate made an absolute statement on Question {answering_q_idx}. Challenge their conviction: "
                 f"\"{doubt}\" Keep strictly under 30 words."
             )
         else:
-            q_num = answering_q_idx + 1
             guidance = (
-                f"Candidate answered the previous question. "
+                f"Candidate answered Question {answering_q_idx}. "
                 f"1. Provide a brief 1-sentence reaction matching your persona ({persona.name}). "
-                f"2. Deliver Question {q_num}: \"{next_q.text if next_q else ''}\". "
+                f"2. Deliver Question {next_q_num}: \"{next_to_deliver_q.text if next_to_deliver_q else ''}\". "
                 f"Keep your entire turn strictly under 35 words."
             )
 

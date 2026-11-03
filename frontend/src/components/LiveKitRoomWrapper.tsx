@@ -99,14 +99,12 @@ function LiveKitRoomWrapper({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
+  const activeRecorderRef = useRef<MediaRecorder | null>(null);
+  const activeTurnChunksRef = useRef<Blob[]>([]);
   const animationFrameRef = useRef<number | null>(null);
 
-  const recognitionRef = useRef<any>(null);
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const speechSafetyTimerRef = useRef<any>(null);
-  const accumulatedSpeechRef = useRef<string>('');
 
   const isAgentSpeakingRef = useRef<boolean>(false);
   const isConcludedRef = useRef<boolean>(false);
@@ -114,9 +112,9 @@ function LiveKitRoomWrapper({
   const isSubmittingRef = useRef<boolean>(false);
   const transcriptBottomRef = useRef<HTMLDivElement>(null);
 
-  // Silence detection tracking
-  const hasSpokenSinceListeningRef = useRef<boolean>(false);
-  const silenceStartTimestampRef = useRef<number | null>(null);
+  // Voice Activity Detection (VAD) silence tracking
+  const hasSpokenInThisTurnRef = useRef<boolean>(false);
+  const silenceStartRef = useRef<number | null>(null);
 
   isAgentSpeakingRef.current = isAgentSpeaking;
   isConcludedRef.current = isConcluded;
@@ -190,17 +188,17 @@ function LiveKitRoomWrapper({
 
               // Voice Activity Detection (VAD)
               if (avg > 15) {
-                hasSpokenSinceListeningRef.current = true;
-                silenceStartTimestampRef.current = null;
+                hasSpokenInThisTurnRef.current = true;
+                silenceStartRef.current = null;
                 setIsCandidateSpeaking(true);
-              } else if (hasSpokenSinceListeningRef.current) {
-                // Candidate spoke earlier and is now silent
-                if (!silenceStartTimestampRef.current) {
-                  silenceStartTimestampRef.current = Date.now();
-                } else if (Date.now() - silenceStartTimestampRef.current > 2000) {
-                  // 2.0 seconds of silence after speaking -> auto-submit!
-                  silenceStartTimestampRef.current = null;
-                  hasSpokenSinceListeningRef.current = false;
+              } else if (hasSpokenInThisTurnRef.current) {
+                // Candidate was speaking earlier and is now quiet
+                if (!silenceStartRef.current) {
+                  silenceStartRef.current = Date.now();
+                } else if (Date.now() - silenceStartRef.current > 2200) {
+                  // 2.2s of silence after speaking -> auto-submit!
+                  silenceStartRef.current = null;
+                  hasSpokenInThisTurnRef.current = false;
                   submitTurnRef.current();
                 }
               }
@@ -243,16 +241,12 @@ function LiveKitRoomWrapper({
       window.speechSynthesis.cancel();
       if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
 
-      // Stop recognition while AI speaks to avoid hearing itself
-      if (recognitionRef.current) {
+      // Stop any active recorder while AI is speaking
+      if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
         try {
-          recognitionRef.current.stop();
+          activeRecorderRef.current.stop();
         } catch (_) {}
-      }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        try {
-          mediaRecorderRef.current.stop();
-        } catch (_) {}
+        activeRecorderRef.current = null;
       }
 
       const utterance = new SpeechSynthesisUtterance(text);
@@ -311,100 +305,44 @@ function LiveKitRoomWrapper({
     }
   }, [persona]);
 
-  // Start Candidate Listening (Dual-Path STT: SpeechRecognition + MediaRecorder Whisper)
+  // Start Candidate Listening: Fresh isolated recorder for this turn only!
   const startListening = useCallback(() => {
     if (isAgentSpeakingRef.current || isConcludedRef.current || micMutedRef.current || isSubmittingRef.current) return;
-    if (typeof window === 'undefined') return;
+    if (!mediaStreamRef.current || !mediaStreamRef.current.active) return;
 
-    accumulatedSpeechRef.current = '';
+    // Reset turn buffers
     setInterimTranscript('');
     setIsCandidateSpeaking(false);
-    hasSpokenSinceListeningRef.current = false;
-    silenceStartTimestampRef.current = null;
+    hasSpokenInThisTurnRef.current = false;
+    silenceStartRef.current = null;
     setStatusMessage('');
 
-    // 1. Start MediaRecorder for guaranteed Whisper backup
-    if (mediaStreamRef.current && mediaStreamRef.current.active) {
+    // Ensure any previous recorder is stopped and destroyed
+    if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
       try {
-        recordedChunksRef.current = [];
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm';
-        const recorder = new MediaRecorder(mediaStreamRef.current, { mimeType });
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            recordedChunksRef.current.push(e.data);
-          }
-        };
-        recorder.start(100);
-        mediaRecorderRef.current = recorder;
-      } catch (err) {
-        console.warn('[mediaRecorder] start failed:', err);
-      }
+        activeRecorderRef.current.stop();
+      } catch (_) {}
     }
 
-    // 2. Start Web Speech API SpeechRecognition
-    const SpeechRecognitionClass =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    // Allocate a brand new isolated chunk buffer for THIS turn
+    activeTurnChunksRef.current = [];
 
-    if (SpeechRecognitionClass) {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (_) {}
-      }
+    try {
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+      const recorder = new MediaRecorder(mediaStreamRef.current, { mimeType });
 
-      try {
-        const recognition = new SpeechRecognitionClass();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          activeTurnChunksRef.current.push(e.data);
+        }
+      };
 
-        recognition.onresult = (event: any) => {
-          if (isAgentSpeakingRef.current || isSubmittingRef.current) return;
-
-          let interim = '';
-          let finalChunk = '';
-
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const item = event.results[i];
-            if (item.isFinal) {
-              finalChunk += item[0].transcript + ' ';
-            } else {
-              interim += item[0].transcript;
-            }
-          }
-
-          if (finalChunk) {
-            accumulatedSpeechRef.current = (accumulatedSpeechRef.current + ' ' + finalChunk).trim();
-          }
-
-          const liveText = (accumulatedSpeechRef.current + ' ' + interim).trim();
-          setInterimTranscript(liveText);
-          if (liveText.length > 0) {
-            setIsCandidateSpeaking(true);
-            hasSpokenSinceListeningRef.current = true;
-          }
-        };
-
-        recognition.onerror = (event: any) => {
-          if (event.error === 'no-speech') return;
-          console.warn('[speechRecognition] event error:', event.error);
-        };
-
-        recognition.onend = () => {
-          if (!isAgentSpeakingRef.current && !isConcludedRef.current && !micMutedRef.current && !isSubmittingRef.current) {
-            try {
-              recognition.start();
-            } catch (_) {}
-          }
-        };
-
-        recognition.start();
-        recognitionRef.current = recognition;
-      } catch (e) {
-        console.warn('[speechRecognition] error starting recognition:', e);
-      }
+      recorder.start(100);
+      activeRecorderRef.current = recorder;
+    } catch (err) {
+      console.warn('[mediaRecorder] failed to start turn recorder:', err);
     }
   }, []);
 
@@ -418,39 +356,33 @@ function LiveKitRoomWrapper({
     setIsCandidateSpeaking(false);
     setStatusMessage('Capturing your response...');
 
-    // 1. Stop SpeechRecognition
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (_) {}
-    }
-
-    // 2. Stop MediaRecorder cleanly and collect finalized Blob
-    let finalizedBlob: Blob | null = null;
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      finalizedBlob = await new Promise<Blob | null>((resolve) => {
-        const rec = mediaRecorderRef.current!;
+    // 1. Stop the active recorder cleanly and extract the finalized audio blob for THIS turn
+    let turnAudioBlob: Blob | null = null;
+    if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
+      turnAudioBlob = await new Promise<Blob | null>((resolve) => {
+        const rec = activeRecorderRef.current!;
         rec.onstop = () => {
-          if (recordedChunksRef.current.length > 0) {
-            resolve(new Blob(recordedChunksRef.current, { type: 'audio/webm' }));
+          if (activeTurnChunksRef.current.length > 0) {
+            resolve(new Blob(activeTurnChunksRef.current, { type: 'audio/webm' }));
           } else {
             resolve(null);
           }
         };
         rec.stop();
       });
-    } else if (recordedChunksRef.current.length > 0) {
-      finalizedBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
+      activeRecorderRef.current = null;
+    } else if (activeTurnChunksRef.current.length > 0) {
+      turnAudioBlob = new Blob(activeTurnChunksRef.current, { type: 'audio/webm' });
     }
 
-    // 3. Resolve candidate text
-    let candidateText = (forcedText || accumulatedSpeechRef.current || interimTranscript).trim();
+    // 2. Resolve candidate text
+    let candidateText = (forcedText || '').trim();
 
-    // If text is empty but audio was recorded by microphone, transcribe via Groq Whisper (~150ms)!
-    if (!candidateText && finalizedBlob && finalizedBlob.size > 500) {
+    // If no typed text was provided, transcribe THIS turn's audio blob via Groq Whisper (~150ms)
+    if (!candidateText && turnAudioBlob && turnAudioBlob.size > 500) {
       setStatusMessage('Transcribing speech via Groq Whisper (~150ms)...');
       try {
-        const whisperResult = await transcribeAudio(finalizedBlob);
+        const whisperResult = await transcribeAudio(turnAudioBlob);
         if (whisperResult && whisperResult.trim()) {
           candidateText = whisperResult.trim();
         }
@@ -459,7 +391,10 @@ function LiveKitRoomWrapper({
       }
     }
 
-    // If still no speech detected (e.g., clicked Send Answer without speaking):
+    // Always clear the chunk buffer after extracting audio so it never leaks
+    activeTurnChunksRef.current = [];
+
+    // If still no speech detected (e.g. user clicked Send Answer without speaking):
     if (!candidateText) {
       setStatusMessage('No speech detected. Please speak into your microphone or click "Type Instead".');
       setIsThinking(false);
@@ -470,9 +405,8 @@ function LiveKitRoomWrapper({
       return;
     }
 
-    // Clear live speech display
-    accumulatedSpeechRef.current = '';
-    setInterimTranscript('');
+    // Display candidate text
+    setInterimTranscript(candidateText);
     setStatusMessage(`Evaluating with ${persona?.name || 'interviewer'}...`);
 
     // Record candidate turn in local ledger
@@ -495,6 +429,7 @@ function LiveKitRoomWrapper({
       setIsThinking(false);
       isSubmittingRef.current = false;
       setStatusMessage('');
+      setInterimTranscript('');
 
       // Record interviewer turn in local ledger
       const aiRecord: TurnRecord = {
@@ -514,7 +449,7 @@ function LiveKitRoomWrapper({
         setIsConcluded(true);
         speakUtterance(res.interviewer_text);
       } else {
-        // Speak interviewer reply, then re-open candidate microphone
+        // Speak interviewer reply, then re-open candidate microphone for the NEXT turn
         speakUtterance(res.interviewer_text, () => {
           startListeningRef.current();
         });
@@ -529,7 +464,7 @@ function LiveKitRoomWrapper({
         startListeningRef.current();
       });
     }
-  }, [sessionId, currentQuestionIndex, persona, interimTranscript, speakUtterance]);
+  }, [sessionId, currentQuestionIndex, persona, speakUtterance]);
 
   submitTurnRef.current = submitTurn;
 
@@ -586,9 +521,9 @@ function LiveKitRoomWrapper({
 
     return () => {
       if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
-      if (recognitionRef.current) {
+      if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
         try {
-          recognitionRef.current.stop();
+          activeRecorderRef.current.stop();
         } catch (_) {}
       }
       if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -609,15 +544,11 @@ function LiveKitRoomWrapper({
     }
 
     if (nextMuted) {
-      if (recognitionRef.current) {
+      if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
         try {
-          recognitionRef.current.stop();
+          activeRecorderRef.current.stop();
         } catch (_) {}
-      }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        try {
-          mediaRecorderRef.current.stop();
-        } catch (_) {}
+        activeRecorderRef.current = null;
       }
       setIsCandidateSpeaking(false);
     } else {
@@ -1147,9 +1078,9 @@ function LiveKitRoomWrapper({
         <button
           onClick={() => {
             if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
-            if (recognitionRef.current) {
+            if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
               try {
-                recognitionRef.current.stop();
+                activeRecorderRef.current.stop();
               } catch (_) {}
             }
             if (typeof window !== 'undefined' && window.speechSynthesis) {
