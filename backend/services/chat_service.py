@@ -49,18 +49,52 @@ _groq_api_key = os.getenv("GROQ_API_KEY")
 _groq_client = AsyncGroq(api_key=_groq_api_key, max_retries=1) if _groq_api_key else None
 
 
+_WHISPER_HALLUCINATIONS = {
+    "thank you",
+    "thank you.",
+    "thank you very much",
+    "thank you very much.",
+    "thank you so much",
+    "thank you so much.",
+    "thanks for watching",
+    "thanks for watching.",
+    "thank you for watching",
+    "thank you for watching.",
+    "subtitles by",
+    "subtitles by the amara.org community",
+    "please subscribe",
+    "subscribe to my channel",
+    "bye",
+    "bye.",
+    "you",
+    "you.",
+    "so",
+    "so...",
+    "silence",
+    "audio",
+}
+
+_TRIVIAL_FILLERS = {
+    "thank you", "thanks", "thank you so much", "okay", "ok", "yes", "got it", "i see", "sure", "alright", "yeah", "uh", "um"
+}
+
+
 def _contains_devanagari(text: str) -> bool:
     """Returns True if text contains characters in the Devanagari Unicode block."""
     return bool(re.search(r'[\u0900-\u097f]', text))
 
 
 def _clean_speech_text(text: str) -> str:
-    """Basic cleanup for speech-to-text transcripts."""
+    """Cleans speech-to-text transcripts and filters out Whisper silence hallucinations."""
     if not text:
         return ""
     clean = text.strip()
-    # Normalize excessive spaces
     clean = re.sub(r'\s+', ' ', clean)
+    norm = re.sub(r"[^\w\s]", "", clean.lower()).strip()
+    if norm in _WHISPER_HALLUCINATIONS:
+        return ""
+    if any(norm.startswith(h) for h in ["thanks for watching", "thank you for watching", "subtitles by"]):
+        return ""
     return clean
 
 
@@ -177,6 +211,20 @@ async def process_turn(
     # If candidate_turns_count == 0, this turn is the Candidate's Introduction!
     # If candidate_turns_count == 1, answering Question 1 (idx 0), and so on.
     answering_q_idx = candidate_turns_count
+
+    # Guard against trivial fillers or hallucinations burning technical question turns
+    norm_text = re.sub(r"[^\w\s]", "", clean_text.lower()).strip()
+    if norm_text in _TRIVIAL_FILLERS and answering_q_idx > 0:
+        current_q = questions[answering_q_idx - 1] if (answering_q_idx - 1 < total_q_count) else None
+        logger.info("[chat_service] Candidate sent filler phrase '%s' on Q%d; holding question without advance", clean_text, answering_q_idx)
+        return {
+            "session_id": session_id,
+            "interviewer_text": "Take your time to structure your thoughts. Whenever you're ready, walk me through your technical approach.",
+            "stage": "in_progress",
+            "question_index": answering_q_idx,
+            "current_question_text": current_q.text if current_q else None,
+            "is_finished": False,
+        }
 
     # Record candidate turn in the ledger
     ledger_service.record_turn(

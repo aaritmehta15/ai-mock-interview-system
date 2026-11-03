@@ -443,6 +443,46 @@ async def interview_chat_endpoint(req: ChatTurnRequest):
         )
 
 
+# ─── Whisper Silence Hallucination Filter ───────────────────────────────────────
+_WHISPER_HALLUCINATIONS = {
+    "thank you",
+    "thank you.",
+    "thank you very much",
+    "thank you very much.",
+    "thank you so much",
+    "thank you so much.",
+    "thanks for watching",
+    "thanks for watching.",
+    "thank you for watching",
+    "thank you for watching.",
+    "subtitles by",
+    "subtitles by the amara.org community",
+    "please subscribe",
+    "subscribe to my channel",
+    "bye",
+    "bye.",
+    "you",
+    "you.",
+    "so",
+    "so...",
+    "silence",
+    "audio",
+}
+
+def is_whisper_hallucination(text: str) -> bool:
+    """Detects and suppresses known Whisper silence / low-energy hallucinations."""
+    if not text:
+        return True
+    norm = re.sub(r"[^\w\s]", "", text.strip().lower())
+    if not norm or len(norm) <= 2:
+        return True
+    if norm in _WHISPER_HALLUCINATIONS:
+        return True
+    if any(norm.startswith(h) for h in ["thanks for watching", "thank you for watching", "subtitles by"]):
+        return True
+    return False
+
+
 @app.post(
     "/api/interview/transcribe",
     summary="Transcribe candidate audio blob using Groq Whisper (~150ms)",
@@ -452,10 +492,11 @@ async def transcribe_audio_endpoint(file: UploadFile = File(...)):
     """
     Direct ultra-low-latency speech-to-text via Groq Whisper.
     Accepts webm, wav, mp4, ogg, or mp3 recorded directly from the browser.
+    Includes hallucination suppression for silence and ambient noise.
     """
     try:
         content = await file.read()
-        if not content or len(content) < 100:
+        if not content or len(content) < 300:
             return {"text": ""}
         if not _groq_client:
             return {"text": ""}
@@ -468,9 +509,15 @@ async def transcribe_audio_endpoint(file: UploadFile = File(...)):
             language="en",
             temperature=0.0,
         )
-        result_text = transcription.text.strip() if hasattr(transcription, "text") else str(transcription).strip()
-        logger.info("[api] Whisper transcribed %d bytes -> '%s'", len(content), result_text[:60])
-        return {"text": result_text}
+        raw_text = transcription.text.strip() if hasattr(transcription, "text") else str(transcription).strip()
+        
+        # Suppress Whisper silence hallucinations ("Thank you.", "Thanks for watching!", etc.)
+        if is_whisper_hallucination(raw_text):
+            logger.info("[api] Filtered Whisper silence hallucination '%s' on %d bytes", raw_text, len(content))
+            return {"text": ""}
+
+        logger.info("[api] Whisper transcribed %d bytes -> '%s'", len(content), raw_text[:60])
+        return {"text": raw_text}
     except Exception as e:
         logger.error("[api] Whisper audio transcription error: %s", e)
         return {"text": ""}

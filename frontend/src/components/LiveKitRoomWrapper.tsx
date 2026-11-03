@@ -10,6 +10,8 @@ import {
   MessageSquare,
   ChevronDown,
   ChevronUp,
+  Clock,
+  Zap,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import LatencyTelemetry from './LatencyTelemetry';
@@ -40,6 +42,38 @@ interface TurnRecord {
   text: string;
   timestamp: string;
   questionIndex?: number;
+}
+
+// Known Whisper silence / low-energy hallucinations
+const WHISPER_HALLUCINATIONS = new Set([
+  'thank you',
+  'thank you.',
+  'thank you very much',
+  'thank you very much.',
+  'thank you so much',
+  'thank you so much.',
+  'thanks for watching',
+  'thanks for watching.',
+  'thank you for watching',
+  'thank you for watching.',
+  'subtitles by',
+  'subtitles by the amara.org community',
+  'please subscribe',
+  'bye',
+  'bye.',
+  'you',
+  'you.',
+  'so',
+  'so...',
+]);
+
+function isHallucination(text: string): boolean {
+  if (!text) return true;
+  const norm = text.trim().toLowerCase().replace(/[^\w\s]/g, '');
+  if (!norm || norm.length <= 2) return true;
+  if (WHISPER_HALLUCINATIONS.has(norm)) return true;
+  if (norm.startsWith('thanks for watching') || norm.startsWith('thank you for watching') || norm.startsWith('subtitles by')) return true;
+  return false;
 }
 
 // Voice matching helper for browser SpeechSynthesis
@@ -94,7 +128,12 @@ function LiveKitRoomWrapper({
   const [micMuted, setMicMuted] = useState<boolean>(false);
   const [audioVolume, setAudioVolume] = useState<number>(0);
   const [hasStarted, setHasStarted] = useState<boolean>(false);
-  const [isSilenceCountdown, setIsSilenceCountdown] = useState<boolean>(false);
+
+  // Turn Submission Mode:
+  // 'deliberate' (Default): Candidate takes all the time they need to think. Clicks 'Send Answer' or presses Spacebar when done.
+  // 'handsfree': Auto-submits after 4.5 seconds of sustained silence following genuine speech.
+  const [turnMode, setTurnMode] = useState<'deliberate' | 'handsfree'>('deliberate');
+  const [autoSendCountdown, setAutoSendCountdown] = useState<number | null>(null);
 
   // References
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -111,11 +150,13 @@ function LiveKitRoomWrapper({
   const isConcludedRef = useRef<boolean>(false);
   const micMutedRef = useRef<boolean>(false);
   const isSubmittingRef = useRef<boolean>(false);
+  const turnModeRef = useRef<'deliberate' | 'handsfree'>('deliberate');
   const transcriptBottomRef = useRef<HTMLDivElement>(null);
 
   // Robust DSP Voice Activity Detection (VAD) with continuous noise floor & hysteresis
   const noiseFloorRef = useRef<number>(12);
   const hasSpokenInThisTurnRef = useRef<boolean>(false);
+  const speechDurationMsRef = useRef<number>(0);
   const isCandidateSpeakingRef = useRef<boolean>(false);
   const silenceStartRef = useRef<number | null>(null);
   const consecutiveSpeechFramesRef = useRef<number>(0);
@@ -124,6 +165,7 @@ function LiveKitRoomWrapper({
   isAgentSpeakingRef.current = isAgentSpeaking;
   isConcludedRef.current = isConcluded;
   micMutedRef.current = micMuted;
+  turnModeRef.current = turnMode;
 
   // Auto-scroll turn ledger drawer
   useEffect(() => {
@@ -145,6 +187,20 @@ function LiveKitRoomWrapper({
   // Forward declarations for mutual referencing
   const startListeningRef = useRef<() => void>(() => {});
   const submitTurnRef = useRef<(forcedText?: string) => Promise<void>>(async () => {});
+
+  // Global Spacebar shortcut to submit answer when not focused on an input
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && (e.target as HTMLElement)?.tagName !== 'INPUT' && (e.target as HTMLElement)?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        if (!isAgentSpeakingRef.current && !isSubmittingRef.current && !isConcludedRef.current) {
+          submitTurnRef.current();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Initialize Microphone & Web Audio Analyser
   useEffect(() => {
@@ -178,10 +234,16 @@ function LiveKitRoomWrapper({
           source.connect(analyser);
           analyserRef.current = analyser;
 
-          // Sound level polling loop with robust DSP VAD
+          // Sound level polling loop with continuous noise floor tracking & VAD
           const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          let lastFrameTime = Date.now();
+
           const checkVolume = () => {
             if (!isMounted) return;
+            const now = Date.now();
+            const deltaMs = now - lastFrameTime;
+            lastFrameTime = now;
+
             if (analyserRef.current && !micMutedRef.current && !isAgentSpeakingRef.current && !isSubmittingRef.current) {
               analyserRef.current.getByteFrequencyData(dataArray);
               let sum = 0;
@@ -192,15 +254,12 @@ function LiveKitRoomWrapper({
               setAudioVolume(avg);
 
               // 1. Continuous Adaptive Noise Floor Tracking
-              // When candidate is not speaking, slowly adapt to background room noise (fans, hum)
               if (!isCandidateSpeakingRef.current) {
                 noiseFloorRef.current = noiseFloorRef.current * 0.98 + avg * 0.02;
               }
 
               // 2. Dynamic Thresholds with Hysteresis
-              // Onset threshold: requires distinct voice energy well above room noise
               const onsetThreshold = Math.max(34, noiseFloorRef.current + 16);
-              // Hold threshold: allows normal acoustic dips between words
               const holdThreshold = Math.max(22, noiseFloorRef.current + 8);
 
               if (avg > onsetThreshold) {
@@ -208,53 +267,54 @@ function LiveKitRoomWrapper({
                 // Require at least 4 consecutive frames (~65ms) to filter out clicks/bumps
                 if (consecutiveSpeechFramesRef.current >= 4) {
                   hasSpokenInThisTurnRef.current = true;
+                  speechDurationMsRef.current += deltaMs;
                   if (!isCandidateSpeakingRef.current) {
                     isCandidateSpeakingRef.current = true;
                     setIsCandidateSpeaking(true);
                   }
                   silenceConsecutiveFramesRef.current = 0;
                   silenceStartRef.current = null;
-                  setIsSilenceCountdown(false);
+                  setAutoSendCountdown(null);
                 }
               } else if (isCandidateSpeakingRef.current && avg > holdThreshold) {
-                // Candidate is pausing briefly between syllables/words
+                // Brief pause between syllables/words
                 consecutiveSpeechFramesRef.current = Math.max(4, consecutiveSpeechFramesRef.current);
+                speechDurationMsRef.current += deltaMs;
                 silenceConsecutiveFramesRef.current = 0;
                 silenceStartRef.current = null;
-                setIsSilenceCountdown(false);
+                setAutoSendCountdown(null);
               } else {
-                // Below hold threshold: silence/pause
+                // Below hold threshold: pause / thinking silence
                 consecutiveSpeechFramesRef.current = 0;
                 silenceConsecutiveFramesRef.current += 1;
 
-                // Only evaluate silence if candidate has actually spoken during this turn
-                if (hasSpokenInThisTurnRef.current) {
-                  // Require at least 6 consecutive frames (~100ms) of quiet to confirm pause
-                  if (silenceConsecutiveFramesRef.current >= 6) {
-                    if (isCandidateSpeakingRef.current) {
-                      isCandidateSpeakingRef.current = false;
-                      setIsCandidateSpeaking(false);
-                    }
-                    if (!silenceStartRef.current) {
-                      silenceStartRef.current = Date.now();
-                      setIsSilenceCountdown(true);
-                    } else {
-                      const elapsedSilence = Date.now() - silenceStartRef.current;
-                      if (elapsedSilence > 1800) {
-                        // 1.8s of sustained silence after speaking -> auto-submit!
-                        silenceStartRef.current = null;
-                        hasSpokenInThisTurnRef.current = false;
-                        setIsSilenceCountdown(false);
-                        submitTurnRef.current();
-                      }
-                    }
-                  }
-                } else {
+                if (silenceConsecutiveFramesRef.current >= 6) {
                   if (isCandidateSpeakingRef.current) {
                     isCandidateSpeakingRef.current = false;
                     setIsCandidateSpeaking(false);
                   }
-                  setIsSilenceCountdown(false);
+
+                  // Only auto-submit if user enabled Hands-Free Mode AND spoke substantial content (> 2.5s)
+                  if (turnModeRef.current === 'handsfree' && hasSpokenInThisTurnRef.current && speechDurationMsRef.current > 2500) {
+                    if (!silenceStartRef.current) {
+                      silenceStartRef.current = now;
+                    } else {
+                      const elapsedSilence = now - silenceStartRef.current;
+                      const remainingSec = Math.max(1, Math.ceil((4500 - elapsedSilence) / 1000));
+                      setAutoSendCountdown(remainingSec);
+
+                      // Generous 4.5 seconds of sustained silence in hands-free mode
+                      if (elapsedSilence > 4500) {
+                        silenceStartRef.current = null;
+                        hasSpokenInThisTurnRef.current = false;
+                        speechDurationMsRef.current = 0;
+                        setAutoSendCountdown(null);
+                        submitTurnRef.current();
+                      }
+                    }
+                  } else {
+                    setAutoSendCountdown(null);
+                  }
                 }
               }
             } else {
@@ -263,7 +323,7 @@ function LiveKitRoomWrapper({
                 isCandidateSpeakingRef.current = false;
                 setIsCandidateSpeaking(false);
               }
-              setIsSilenceCountdown(false);
+              setAutoSendCountdown(null);
             }
             animationFrameRef.current = requestAnimationFrame(checkVolume);
           };
@@ -365,19 +425,20 @@ function LiveKitRoomWrapper({
     }
   }, [persona]);
 
-  // Start Candidate Listening: Fresh isolated recorder for this turn only!
+  // Start Candidate Listening: Fresh isolated recorder for this turn only
   const startListening = useCallback(() => {
     if (isAgentSpeakingRef.current || isConcludedRef.current || micMutedRef.current || isSubmittingRef.current) return;
     if (!mediaStreamRef.current || !mediaStreamRef.current.active) return;
 
-    // Reset turn state
+    // Reset turn buffers
     setIsCandidateSpeaking(false);
     isCandidateSpeakingRef.current = false;
     hasSpokenInThisTurnRef.current = false;
+    speechDurationMsRef.current = 0;
     silenceStartRef.current = null;
     consecutiveSpeechFramesRef.current = 0;
     silenceConsecutiveFramesRef.current = 0;
-    setIsSilenceCountdown(false);
+    setAutoSendCountdown(null);
     setStatusMessage('');
 
     // Ensure any previous recorder is cleanly stopped
@@ -418,8 +479,8 @@ function LiveKitRoomWrapper({
     setIsThinking(true);
     setIsCandidateSpeaking(false);
     isCandidateSpeakingRef.current = false;
-    setIsSilenceCountdown(false);
-    setStatusMessage('Capturing your response...');
+    setAutoSendCountdown(null);
+    setStatusMessage('Processing your answer...');
 
     // 1. Stop the active recorder cleanly and extract the finalized audio blob for THIS turn only
     let turnAudioBlob: Blob | null = null;
@@ -442,7 +503,6 @@ function LiveKitRoomWrapper({
         } catch (_) {
           done();
         }
-        // Safety fallback in case onstop is delayed
         setTimeout(done, 300);
       });
       activeRecorderRef.current = null;
@@ -458,7 +518,7 @@ function LiveKitRoomWrapper({
       setStatusMessage('Transcribing speech via Groq Whisper (~150ms)...');
       try {
         const whisperResult = await transcribeAudio(turnAudioBlob);
-        if (whisperResult && whisperResult.trim()) {
+        if (whisperResult && whisperResult.trim() && !isHallucination(whisperResult)) {
           candidateText = whisperResult.trim();
         }
       } catch (err) {
@@ -469,20 +529,20 @@ function LiveKitRoomWrapper({
     // Clear the chunk buffer immediately after extracting audio so it never leaks
     activeTurnChunksRef.current = [];
 
-    // If still no speech detected (e.g. user clicked Send Answer without speaking):
-    if (!candidateText) {
-      setStatusMessage('No speech detected. Please speak into your microphone or click "Type Instead".');
+    // If still no valid speech detected (e.g. user paused to think or clicked Send without speaking):
+    if (!candidateText || isHallucination(candidateText)) {
+      setStatusMessage('Take all the time you need to think. Speak your answer, then click "Send Answer" (or press Space).');
       setIsThinking(false);
       isSubmittingRef.current = false;
       setTimeout(() => {
         startListeningRef.current();
-      }, 1800);
+      }, 1600);
       return;
     }
 
     // Update display with verbatim recognized speech
     setLastTranscribedText(candidateText);
-    setStatusMessage(`Evaluating with ${persona?.name || 'interviewer'}...`);
+    setStatusMessage(`Evaluating response with ${persona?.name || 'interviewer'}...`);
 
     // Record candidate turn in local ledger
     const candRecord: TurnRecord = {
@@ -626,7 +686,7 @@ function LiveKitRoomWrapper({
       }
       setIsCandidateSpeaking(false);
       isCandidateSpeakingRef.current = false;
-      setIsSilenceCountdown(false);
+      setAutoSendCountdown(null);
     } else {
       if (!isAgentSpeakingRef.current && !isConcludedRef.current) {
         startListeningRef.current();
@@ -887,10 +947,10 @@ function LiveKitRoomWrapper({
               ? '🗣️ CANDIDATE SPEAKING (MICROPHONE ACTIVE)'
               : micMuted
               ? '🔇 MICROPHONE MUTED'
-              : `👂 ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS LISTENING · SPEAK NOW`}
+              : `👂 ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS LISTENING · TAKE YOUR TIME`}
           </span>
 
-          <p style={{ fontSize: 13, color: '#94a3b8', margin: '8px 0 0', maxWidth: 540 }}>
+          <p style={{ fontSize: 13, color: '#94a3b8', margin: '8px 0 0', maxWidth: 560 }}>
             {isConcluded
               ? 'You have completed all technical questions! Click "End Interview & Evaluate" below to view your dossier.'
               : statusMessage
@@ -898,10 +958,10 @@ function LiveKitRoomWrapper({
               : isAgentSpeaking
               ? (turns[turns.length - 1]?.text ? `"${turns[turns.length - 1].text.slice(0, 110)}..."` : 'Listening carefully to your technical rationale.')
               : isCandidateSpeaking
-              ? 'Speaking... Pause for 2 seconds or click Send Answer when finished.'
+              ? 'Speaking... Take your time to explain. Click "Send Answer" or press Spacebar when finished.'
               : persona
-              ? `${persona.tagline || persona.signature_phrase}`
-              : 'Speak naturally into your microphone.'}
+              ? `${persona.tagline || persona.signature_phrase} Take all the time you need to think through your approach.`
+              : 'Take all the time you need to think. Speak when ready.'}
           </p>
 
           {currentQuestionText && currentQuestionIndex > 0 && !isConcluded && (
@@ -924,7 +984,7 @@ function LiveKitRoomWrapper({
           )}
         </div>
 
-        {/* Audio Reactive Pulse Bars (Connected to Web Audio Analyser) */}
+        {/* Audio Reactive Pulse Bars */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 18, height: 36, zIndex: 2 }}>
           {[14, 26, 38, 22, 34, 18, 30, 42, 24, 16, 32, 20].map((baseH, idx) => {
             const dynamicScale = audioVolume > 5 ? Math.min(1.8, 0.3 + (audioVolume / 45)) : 0.25;
@@ -964,12 +1024,12 @@ function LiveKitRoomWrapper({
         borderRadius: 12,
         background: isCandidateSpeaking
           ? 'rgba(244, 63, 94, 0.08)'
-          : isSilenceCountdown
+          : autoSendCountdown !== null
           ? 'rgba(245, 158, 11, 0.08)'
           : 'rgba(255, 255, 255, 0.03)',
         border: isCandidateSpeaking
           ? '1px solid rgba(244, 63, 94, 0.25)'
-          : isSilenceCountdown
+          : autoSendCountdown !== null
           ? '1px solid rgba(245, 158, 11, 0.25)'
           : '1px solid rgba(255, 255, 255, 0.06)',
         transition: 'background 0.2s ease, border-color 0.2s ease',
@@ -979,27 +1039,54 @@ function LiveKitRoomWrapper({
             width: 8,
             height: 8,
             borderRadius: '50%',
-            background: isCandidateSpeaking ? '#f43f5e' : isSilenceCountdown ? '#f59e0b' : '#10b981',
+            background: isCandidateSpeaking ? '#f43f5e' : autoSendCountdown !== null ? '#f59e0b' : '#10b981',
             flexShrink: 0,
-            boxShadow: isCandidateSpeaking ? '0 0 8px #f43f5e' : isSilenceCountdown ? '0 0 8px #f59e0b' : '0 0 8px #10b981',
+            boxShadow: isCandidateSpeaking ? '0 0 8px #f43f5e' : autoSendCountdown !== null ? '0 0 8px #f59e0b' : '0 0 8px #10b981',
           }} />
           <span style={{
             fontSize: 13,
-            color: isCandidateSpeaking ? '#fecdd3' : isSilenceCountdown ? '#fde68a' : '#94a3b8',
+            color: isCandidateSpeaking ? '#fecdd3' : autoSendCountdown !== null ? '#fde68a' : '#94a3b8',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}>
             {isCandidateSpeaking
-              ? '🎙️ Candidate speaking... (pause 2s or click Send Answer when done)'
-              : isSilenceCountdown
-              ? '⏳ Silence detected — submitting in 1s... (or click Send Answer now)'
+              ? '🎙️ Candidate speaking... (take your time, click Send Answer or press Spacebar when done)'
+              : autoSendCountdown !== null
+              ? `⏳ Silence pause detected — auto-submitting in ${autoSendCountdown}s (or click Send Answer now)`
               : statusMessage
               ? statusMessage
               : lastTranscribedText
               ? `Last spoken: "${lastTranscribedText.slice(0, 90)}..."`
-              : 'Ready. Speak your technical rationale or tap Send Answer below.'}
+              : turnMode === 'deliberate'
+              ? '💡 Deliberate Mode: Take your time to think. Click "Send Answer" or press Spacebar when finished.'
+              : '⚡ Hands-Free Mode: Speaks naturally. Auto-submits after 4.5s pause.'}
           </span>
+        </div>
+
+        {/* Mode Toggle Switch */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          <button
+            onClick={() => setTurnMode(turnMode === 'deliberate' ? 'handsfree' : 'deliberate')}
+            type="button"
+            title={turnMode === 'deliberate' ? 'Switch to Hands-Free (4.5s pause auto-send)' : 'Switch to Deliberate Mode (Click to Send)'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 10px',
+              borderRadius: 8,
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              background: turnMode === 'deliberate' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              color: turnMode === 'deliberate' ? '#818cf8' : '#f59e0b',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {turnMode === 'deliberate' ? <Clock size={12} /> : <Zap size={12} />}
+            <span>{turnMode === 'deliberate' ? 'Mode: Deliberate (Click Send)' : 'Mode: Hands-Free (4.5s)'}</span>
+          </button>
         </div>
       </div>
 
@@ -1139,27 +1226,28 @@ function LiveKitRoomWrapper({
             onClick={() => submitTurn()}
             disabled={isAgentSpeaking || isThinking}
             type="button"
+            title="Click or press Spacebar to submit your answer"
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 8,
-              padding: '11px 22px',
+              padding: '11px 24px',
               borderRadius: 99,
               border: isCandidateSpeaking ? '1px solid #f43f5e' : '1px solid rgba(99, 102, 241, 0.4)',
               background: isCandidateSpeaking
                 ? 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)'
-                : 'linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(79, 70, 229, 0.25) 100%)',
+                : 'linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(79, 70, 229, 0.3) 100%)',
               color: '#fff',
               fontSize: 13,
               fontWeight: 700,
               cursor: isAgentSpeaking || isThinking ? 'not-allowed' : 'pointer',
               opacity: isAgentSpeaking || isThinking ? 0.45 : 1,
-              boxShadow: isCandidateSpeaking ? '0 0 16px rgba(244, 63, 94, 0.5)' : 'none',
+              boxShadow: isCandidateSpeaking ? '0 0 18px rgba(244, 63, 94, 0.5)' : '0 0 12px rgba(99, 102, 241, 0.2)',
               transition: 'all 0.2s ease',
             }}
           >
             <Send size={15} />
-            <span>{isThinking ? 'Evaluating...' : 'Send Answer'}</span>
+            <span>{isThinking ? 'Evaluating...' : 'Send Answer (Space)'}</span>
           </button>
 
           {/* End & Evaluate Button */}
