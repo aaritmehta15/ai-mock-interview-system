@@ -57,7 +57,7 @@ function selectPersonaVoice(voices: SpeechSynthesisVoice[], personaId?: string):
   if (personaId === 'priya') {
     return (
       englishVoices.find(v => /zira|samantha|female|karen|victoria|sonia/i.test(v.name)) ||
-      englishVoices.find(v => /female/i.test(v.name)) ||
+      englishVoices.find(v => !/female/i.test(v.name)) ||
       englishVoices[0]
     );
   }
@@ -87,13 +87,14 @@ function LiveKitRoomWrapper({
   const [isCandidateSpeaking, setIsCandidateSpeaking] = useState<boolean>(false);
   const [isThinking, setIsThinking] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
-  const [interimTranscript, setInterimTranscript] = useState<string>('');
+  const [lastTranscribedText, setLastTranscribedText] = useState<string>('');
   const [manualText, setManualText] = useState<string>('');
   const [showManualInput, setShowManualInput] = useState<boolean>(false);
   const [showTranscript, setShowTranscript] = useState<boolean>(false);
   const [micMuted, setMicMuted] = useState<boolean>(false);
   const [audioVolume, setAudioVolume] = useState<number>(0);
   const [hasStarted, setHasStarted] = useState<boolean>(false);
+  const [isSilenceCountdown, setIsSilenceCountdown] = useState<boolean>(false);
 
   // References
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -112,9 +113,13 @@ function LiveKitRoomWrapper({
   const isSubmittingRef = useRef<boolean>(false);
   const transcriptBottomRef = useRef<HTMLDivElement>(null);
 
-  // Voice Activity Detection (VAD) silence tracking
+  // Robust DSP Voice Activity Detection (VAD) with continuous noise floor & hysteresis
+  const noiseFloorRef = useRef<number>(12);
   const hasSpokenInThisTurnRef = useRef<boolean>(false);
+  const isCandidateSpeakingRef = useRef<boolean>(false);
   const silenceStartRef = useRef<number | null>(null);
+  const consecutiveSpeechFramesRef = useRef<number>(0);
+  const silenceConsecutiveFramesRef = useRef<number>(0);
 
   isAgentSpeakingRef.current = isAgentSpeaking;
   isConcludedRef.current = isConcluded;
@@ -173,7 +178,7 @@ function LiveKitRoomWrapper({
           source.connect(analyser);
           analyserRef.current = analyser;
 
-          // Sound level polling loop & silence detection
+          // Sound level polling loop with robust DSP VAD
           const dataArray = new Uint8Array(analyser.frequencyBinCount);
           const checkVolume = () => {
             if (!isMounted) return;
@@ -186,24 +191,79 @@ function LiveKitRoomWrapper({
               const avg = sum / dataArray.length;
               setAudioVolume(avg);
 
-              // Voice Activity Detection (VAD)
-              if (avg > 15) {
-                hasSpokenInThisTurnRef.current = true;
-                silenceStartRef.current = null;
-                setIsCandidateSpeaking(true);
-              } else if (hasSpokenInThisTurnRef.current) {
-                // Candidate was speaking earlier and is now quiet
-                if (!silenceStartRef.current) {
-                  silenceStartRef.current = Date.now();
-                } else if (Date.now() - silenceStartRef.current > 2200) {
-                  // 2.2s of silence after speaking -> auto-submit!
+              // 1. Continuous Adaptive Noise Floor Tracking
+              // When candidate is not speaking, slowly adapt to background room noise (fans, hum)
+              if (!isCandidateSpeakingRef.current) {
+                noiseFloorRef.current = noiseFloorRef.current * 0.98 + avg * 0.02;
+              }
+
+              // 2. Dynamic Thresholds with Hysteresis
+              // Onset threshold: requires distinct voice energy well above room noise
+              const onsetThreshold = Math.max(34, noiseFloorRef.current + 16);
+              // Hold threshold: allows normal acoustic dips between words
+              const holdThreshold = Math.max(22, noiseFloorRef.current + 8);
+
+              if (avg > onsetThreshold) {
+                consecutiveSpeechFramesRef.current += 1;
+                // Require at least 4 consecutive frames (~65ms) to filter out clicks/bumps
+                if (consecutiveSpeechFramesRef.current >= 4) {
+                  hasSpokenInThisTurnRef.current = true;
+                  if (!isCandidateSpeakingRef.current) {
+                    isCandidateSpeakingRef.current = true;
+                    setIsCandidateSpeaking(true);
+                  }
+                  silenceConsecutiveFramesRef.current = 0;
                   silenceStartRef.current = null;
-                  hasSpokenInThisTurnRef.current = false;
-                  submitTurnRef.current();
+                  setIsSilenceCountdown(false);
+                }
+              } else if (isCandidateSpeakingRef.current && avg > holdThreshold) {
+                // Candidate is pausing briefly between syllables/words
+                consecutiveSpeechFramesRef.current = Math.max(4, consecutiveSpeechFramesRef.current);
+                silenceConsecutiveFramesRef.current = 0;
+                silenceStartRef.current = null;
+                setIsSilenceCountdown(false);
+              } else {
+                // Below hold threshold: silence/pause
+                consecutiveSpeechFramesRef.current = 0;
+                silenceConsecutiveFramesRef.current += 1;
+
+                // Only evaluate silence if candidate has actually spoken during this turn
+                if (hasSpokenInThisTurnRef.current) {
+                  // Require at least 6 consecutive frames (~100ms) of quiet to confirm pause
+                  if (silenceConsecutiveFramesRef.current >= 6) {
+                    if (isCandidateSpeakingRef.current) {
+                      isCandidateSpeakingRef.current = false;
+                      setIsCandidateSpeaking(false);
+                    }
+                    if (!silenceStartRef.current) {
+                      silenceStartRef.current = Date.now();
+                      setIsSilenceCountdown(true);
+                    } else {
+                      const elapsedSilence = Date.now() - silenceStartRef.current;
+                      if (elapsedSilence > 1800) {
+                        // 1.8s of sustained silence after speaking -> auto-submit!
+                        silenceStartRef.current = null;
+                        hasSpokenInThisTurnRef.current = false;
+                        setIsSilenceCountdown(false);
+                        submitTurnRef.current();
+                      }
+                    }
+                  }
+                } else {
+                  if (isCandidateSpeakingRef.current) {
+                    isCandidateSpeakingRef.current = false;
+                    setIsCandidateSpeaking(false);
+                  }
+                  setIsSilenceCountdown(false);
                 }
               }
             } else {
               setAudioVolume(0);
+              if (isCandidateSpeakingRef.current) {
+                isCandidateSpeakingRef.current = false;
+                setIsCandidateSpeaking(false);
+              }
+              setIsSilenceCountdown(false);
             }
             animationFrameRef.current = requestAnimationFrame(checkVolume);
           };
@@ -241,7 +301,7 @@ function LiveKitRoomWrapper({
       window.speechSynthesis.cancel();
       if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
 
-      // Stop any active recorder while AI is speaking
+      // Stop any active recorder while AI speaks
       if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
         try {
           activeRecorderRef.current.stop();
@@ -310,21 +370,24 @@ function LiveKitRoomWrapper({
     if (isAgentSpeakingRef.current || isConcludedRef.current || micMutedRef.current || isSubmittingRef.current) return;
     if (!mediaStreamRef.current || !mediaStreamRef.current.active) return;
 
-    // Reset turn buffers
-    setInterimTranscript('');
+    // Reset turn state
     setIsCandidateSpeaking(false);
+    isCandidateSpeakingRef.current = false;
     hasSpokenInThisTurnRef.current = false;
     silenceStartRef.current = null;
+    consecutiveSpeechFramesRef.current = 0;
+    silenceConsecutiveFramesRef.current = 0;
+    setIsSilenceCountdown(false);
     setStatusMessage('');
 
-    // Ensure any previous recorder is stopped and destroyed
+    // Ensure any previous recorder is cleanly stopped
     if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
       try {
         activeRecorderRef.current.stop();
       } catch (_) {}
     }
 
-    // Allocate a brand new isolated chunk buffer for THIS turn
+    // Allocate a brand new isolated chunk buffer for THIS turn only
     activeTurnChunksRef.current = [];
 
     try {
@@ -354,21 +417,33 @@ function LiveKitRoomWrapper({
     isSubmittingRef.current = true;
     setIsThinking(true);
     setIsCandidateSpeaking(false);
+    isCandidateSpeakingRef.current = false;
+    setIsSilenceCountdown(false);
     setStatusMessage('Capturing your response...');
 
-    // 1. Stop the active recorder cleanly and extract the finalized audio blob for THIS turn
+    // 1. Stop the active recorder cleanly and extract the finalized audio blob for THIS turn only
     let turnAudioBlob: Blob | null = null;
     if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
       turnAudioBlob = await new Promise<Blob | null>((resolve) => {
         const rec = activeRecorderRef.current!;
-        rec.onstop = () => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
           if (activeTurnChunksRef.current.length > 0) {
             resolve(new Blob(activeTurnChunksRef.current, { type: 'audio/webm' }));
           } else {
             resolve(null);
           }
         };
-        rec.stop();
+        rec.onstop = done;
+        try {
+          rec.stop();
+        } catch (_) {
+          done();
+        }
+        // Safety fallback in case onstop is delayed
+        setTimeout(done, 300);
       });
       activeRecorderRef.current = null;
     } else if (activeTurnChunksRef.current.length > 0) {
@@ -378,8 +453,8 @@ function LiveKitRoomWrapper({
     // 2. Resolve candidate text
     let candidateText = (forcedText || '').trim();
 
-    // If no typed text was provided, transcribe THIS turn's audio blob via Groq Whisper (~150ms)
-    if (!candidateText && turnAudioBlob && turnAudioBlob.size > 500) {
+    // If no manual text was provided, transcribe THIS turn's audio blob via Groq Whisper (~150ms)
+    if (!candidateText && turnAudioBlob && turnAudioBlob.size > 400) {
       setStatusMessage('Transcribing speech via Groq Whisper (~150ms)...');
       try {
         const whisperResult = await transcribeAudio(turnAudioBlob);
@@ -391,7 +466,7 @@ function LiveKitRoomWrapper({
       }
     }
 
-    // Always clear the chunk buffer after extracting audio so it never leaks
+    // Clear the chunk buffer immediately after extracting audio so it never leaks
     activeTurnChunksRef.current = [];
 
     // If still no speech detected (e.g. user clicked Send Answer without speaking):
@@ -405,8 +480,8 @@ function LiveKitRoomWrapper({
       return;
     }
 
-    // Display candidate text
-    setInterimTranscript(candidateText);
+    // Update display with verbatim recognized speech
+    setLastTranscribedText(candidateText);
     setStatusMessage(`Evaluating with ${persona?.name || 'interviewer'}...`);
 
     // Record candidate turn in local ledger
@@ -429,7 +504,6 @@ function LiveKitRoomWrapper({
       setIsThinking(false);
       isSubmittingRef.current = false;
       setStatusMessage('');
-      setInterimTranscript('');
 
       // Record interviewer turn in local ledger
       const aiRecord: TurnRecord = {
@@ -551,6 +625,8 @@ function LiveKitRoomWrapper({
         activeRecorderRef.current = null;
       }
       setIsCandidateSpeaking(false);
+      isCandidateSpeakingRef.current = false;
+      setIsSilenceCountdown(false);
     } else {
       if (!isAgentSpeakingRef.current && !isConcludedRef.current) {
         startListeningRef.current();
@@ -573,7 +649,7 @@ function LiveKitRoomWrapper({
       flexDirection: 'column',
       gap: 20,
       width: '100%',
-      maxWidth: 820,
+      maxWidth: 840,
       margin: '0 auto',
       padding: '28px 32px',
       background: 'var(--surface-1, #0f121a)',
@@ -603,7 +679,7 @@ function LiveKitRoomWrapper({
           <LatencyTelemetry
             isCallActive={true}
             isAgentSpeaking={isAgentSpeaking}
-            isCandidateSpeaking={isCandidateSpeaking || audioVolume > 15}
+            isCandidateSpeaking={isCandidateSpeaking}
             currentTurnCount={turns.length}
           />
           <div style={{
@@ -652,14 +728,14 @@ function LiveKitRoomWrapper({
         />
       </div>
 
-      {/* Stage: AI Interviewer Presence & Dynamic Orb */}
+      {/* Stage: AI Interviewer Presence & Dynamic Orb (Fixed height to guarantee ZERO layout jump) */}
       <div style={{
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: 310,
+        minHeight: 330,
         background: 'radial-gradient(ellipse at center, rgba(30, 36, 54, 0.6) 0%, rgba(13, 16, 24, 0.95) 100%)',
         border: '1px solid rgba(255, 255, 255, 0.08)',
         borderRadius: 20,
@@ -695,13 +771,13 @@ function LiveKitRoomWrapper({
           animate={{
             scale: isAgentSpeaking
               ? [1, 1.35, 1.05, 1.25, 1]
-              : (isCandidateSpeaking || audioVolume > 15)
-              ? [1, 1.2, 1]
+              : isCandidateSpeaking
+              ? [1, 1.25, 1]
               : [1, 1.05, 1],
             opacity: isAgentSpeaking
               ? [0.55, 0.9, 0.55]
-              : (isCandidateSpeaking || audioVolume > 15)
-              ? [0.45, 0.75, 0.45]
+              : isCandidateSpeaking
+              ? [0.5, 0.8, 0.5]
               : [0.15, 0.25, 0.15],
           }}
           transition={{ duration: isAgentSpeaking ? 1.6 : 2.0, repeat: Infinity, ease: 'easeInOut' }}
@@ -712,7 +788,7 @@ function LiveKitRoomWrapper({
             borderRadius: '50%',
             background: isAgentSpeaking
               ? `radial-gradient(circle, ${persona?.accent_color || '#6366f1'} 0%, transparent 70%)`
-              : (isCandidateSpeaking || audioVolume > 15)
+              : isCandidateSpeaking
               ? 'radial-gradient(circle, #f43f5e 0%, transparent 70%)'
               : 'radial-gradient(circle, #3b82f6 0%, transparent 70%)',
             filter: 'blur(35px)',
@@ -730,7 +806,7 @@ function LiveKitRoomWrapper({
               : [1, 1.02, 1],
             boxShadow: isAgentSpeaking
               ? `0 0 40px ${persona?.accent_color || 'rgba(99, 102, 241, 0.85)'}`
-              : (isCandidateSpeaking || audioVolume > 15)
+              : isCandidateSpeaking
               ? '0 0 35px rgba(244, 63, 94, 0.75)'
               : '0 0 20px rgba(59, 130, 246, 0.3)',
           }}
@@ -767,32 +843,38 @@ function LiveKitRoomWrapper({
             letterSpacing: '0.06em',
             padding: '5px 16px',
             borderRadius: 99,
-            background: isAgentSpeaking
-              ? 'rgba(99, 102, 241, 0.25)'
-              : (isCandidateSpeaking || audioVolume > 15)
-              ? 'rgba(244, 63, 94, 0.25)'
+            background: isConcluded
+              ? 'rgba(16, 185, 129, 0.25)'
               : isThinking
               ? 'rgba(245, 158, 11, 0.25)'
-              : isConcluded
-              ? 'rgba(16, 185, 129, 0.25)'
+              : isAgentSpeaking
+              ? 'rgba(99, 102, 241, 0.25)'
+              : isCandidateSpeaking
+              ? 'rgba(244, 63, 94, 0.25)'
+              : micMuted
+              ? 'rgba(244, 63, 94, 0.15)'
               : 'rgba(255, 255, 255, 0.08)',
-            border: isAgentSpeaking
-              ? `1px solid ${persona?.accent_color || '#6366f1'}`
-              : (isCandidateSpeaking || audioVolume > 15)
-              ? '1px solid #f43f5e'
+            border: isConcluded
+              ? '1px solid #10b981'
               : isThinking
               ? '1px solid #f59e0b'
-              : isConcluded
-              ? '1px solid #10b981'
+              : isAgentSpeaking
+              ? `1px solid ${persona?.accent_color || '#6366f1'}`
+              : isCandidateSpeaking
+              ? '1px solid #f43f5e'
+              : micMuted
+              ? '1px solid #f43f5e'
               : '1px solid rgba(255, 255, 255, 0.15)',
-            color: isAgentSpeaking
-              ? '#c7d2fe'
-              : (isCandidateSpeaking || audioVolume > 15)
-              ? '#fecdd3'
+            color: isConcluded
+              ? '#a7f3d0'
               : isThinking
               ? '#fde68a'
-              : isConcluded
-              ? '#a7f3d0'
+              : isAgentSpeaking
+              ? '#c7d2fe'
+              : isCandidateSpeaking
+              ? '#fecdd3'
+              : micMuted
+              ? '#fca5a5'
               : '#94a3b8',
           }}>
             {isConcluded
@@ -801,22 +883,22 @@ function LiveKitRoomWrapper({
               ? (statusMessage || `⚡ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS EVALUATING...`)
               : isAgentSpeaking
               ? `🎙️ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS SPEAKING`
-              : (isCandidateSpeaking || audioVolume > 15)
+              : isCandidateSpeaking
               ? '🗣️ CANDIDATE SPEAKING (MICROPHONE ACTIVE)'
               : micMuted
               ? '🔇 MICROPHONE MUTED'
               : `👂 ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS LISTENING · SPEAK NOW`}
           </span>
 
-          <p style={{ fontSize: 13, color: '#94a3b8', margin: '8px 0 0', maxWidth: 520 }}>
+          <p style={{ fontSize: 13, color: '#94a3b8', margin: '8px 0 0', maxWidth: 540 }}>
             {isConcluded
               ? 'You have completed all technical questions! Click "End Interview & Evaluate" below to view your dossier.'
               : statusMessage
               ? statusMessage
               : isAgentSpeaking
               ? (turns[turns.length - 1]?.text ? `"${turns[turns.length - 1].text.slice(0, 110)}..."` : 'Listening carefully to your technical rationale.')
-              : (isCandidateSpeaking || audioVolume > 15)
-              ? 'Speak naturally. When you finish, pause for 2 seconds or click "Send Answer".'
+              : isCandidateSpeaking
+              ? 'Speaking... Pause for 2 seconds or click Send Answer when finished.'
               : persona
               ? `${persona.tagline || persona.signature_phrase}`
               : 'Speak naturally into your microphone.'}
@@ -832,7 +914,7 @@ function LiveKitRoomWrapper({
               padding: '4px 12px',
               borderRadius: 8,
               display: 'inline-block',
-              maxWidth: 580,
+              maxWidth: 600,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -842,8 +924,8 @@ function LiveKitRoomWrapper({
           )}
         </div>
 
-        {/* Audio Reactive Pulse Bars (Connected to real Web Audio Analyser!) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 20, height: 36, zIndex: 2 }}>
+        {/* Audio Reactive Pulse Bars (Connected to Web Audio Analyser) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 18, height: 36, zIndex: 2 }}>
           {[14, 26, 38, 22, 34, 18, 30, 42, 24, 16, 32, 20].map((baseH, idx) => {
             const dynamicScale = audioVolume > 5 ? Math.min(1.8, 0.3 + (audioVolume / 45)) : 0.25;
             return (
@@ -852,12 +934,12 @@ function LiveKitRoomWrapper({
                 animate={{
                   height: isAgentSpeaking
                     ? [baseH * 0.35, baseH * 1.35, baseH * 0.45]
-                    : audioVolume > 10
+                    : audioVolume > 12
                     ? [baseH * dynamicScale, baseH * (dynamicScale * 1.3), baseH * dynamicScale * 0.8]
                     : 6,
                   background: isAgentSpeaking
                     ? (persona?.accent_color || '#818cf8')
-                    : (isCandidateSpeaking || audioVolume > 12)
+                    : isCandidateSpeaking
                     ? '#f43f5e'
                     : 'rgba(255,255,255,0.15)',
                 }}
@@ -869,57 +951,57 @@ function LiveKitRoomWrapper({
         </div>
       </div>
 
-      {/* Live Interim Transcript Bubble (Candidate voice feedback) */}
-      <AnimatePresence>
-        {(interimTranscript || audioVolume > 15 || statusMessage) && !isAgentSpeaking && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            style={{
-              padding: '12px 18px',
-              borderRadius: 14,
-              background: 'rgba(244, 63, 94, 0.08)',
-              border: '1px solid rgba(244, 63, 94, 0.3)',
-              color: '#fecdd3',
-              fontSize: 13,
-              lineHeight: 1.5,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f43f5e', flexShrink: 0, boxShadow: '0 0 8px #f43f5e' }} />
-              <div>
-                <strong style={{ color: '#fff', marginRight: 6 }}>
-                  {interimTranscript ? 'Hearing you say:' : statusMessage ? 'Status:' : 'Microphone audio active:'}
-                </strong>
-                <span>{interimTranscript ? `"${interimTranscript}"` : statusMessage || 'Listening to your response...'}</span>
-              </div>
-            </div>
-            <button
-              onClick={() => submitTurn()}
-              disabled={isThinking || isAgentSpeaking}
-              type="button"
-              style={{
-                background: isThinking ? '#64748b' : '#f43f5e',
-                border: 'none',
-                borderRadius: 8,
-                padding: '6px 14px',
-                color: '#fff',
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: isThinking ? 'not-allowed' : 'pointer',
-                flexShrink: 0,
-              }}
-            >
-              {isThinking ? 'Processing...' : 'Send Answer'}
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Fixed-Height Feedback Banner (Guarantees absolute ZERO button jumping or layout shift!) */}
+      <div style={{
+        height: 48,
+        minHeight: 48,
+        maxHeight: 48,
+        boxSizing: 'border-box',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 16px',
+        borderRadius: 12,
+        background: isCandidateSpeaking
+          ? 'rgba(244, 63, 94, 0.08)'
+          : isSilenceCountdown
+          ? 'rgba(245, 158, 11, 0.08)'
+          : 'rgba(255, 255, 255, 0.03)',
+        border: isCandidateSpeaking
+          ? '1px solid rgba(244, 63, 94, 0.25)'
+          : isSilenceCountdown
+          ? '1px solid rgba(245, 158, 11, 0.25)'
+          : '1px solid rgba(255, 255, 255, 0.06)',
+        transition: 'background 0.2s ease, border-color 0.2s ease',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, overflow: 'hidden' }}>
+          <span style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: isCandidateSpeaking ? '#f43f5e' : isSilenceCountdown ? '#f59e0b' : '#10b981',
+            flexShrink: 0,
+            boxShadow: isCandidateSpeaking ? '0 0 8px #f43f5e' : isSilenceCountdown ? '0 0 8px #f59e0b' : '0 0 8px #10b981',
+          }} />
+          <span style={{
+            fontSize: 13,
+            color: isCandidateSpeaking ? '#fecdd3' : isSilenceCountdown ? '#fde68a' : '#94a3b8',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {isCandidateSpeaking
+              ? '🎙️ Candidate speaking... (pause 2s or click Send Answer when done)'
+              : isSilenceCountdown
+              ? '⏳ Silence detected — submitting in 1s... (or click Send Answer now)'
+              : statusMessage
+              ? statusMessage
+              : lastTranscribedText
+              ? `Last spoken: "${lastTranscribedText.slice(0, 90)}..."`
+              : 'Ready. Speak your technical rationale or tap Send Answer below.'}
+          </span>
+        </div>
+      </div>
 
       {/* Manual Input Fallback Drawer */}
       <AnimatePresence>
@@ -981,7 +1063,7 @@ function LiveKitRoomWrapper({
         )}
       </AnimatePresence>
 
-      {/* Primary Interactive Action Bar */}
+      {/* Primary Interactive Action Bar (Fixed, rock-solid layout: NEVER jumps!) */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {/* Mute/Unmute Mic */}
@@ -1005,30 +1087,6 @@ function LiveKitRoomWrapper({
           >
             {!micMuted ? <Mic size={16} /> : <MicOff size={16} />}
             <span>{!micMuted ? 'Mute Mic' : 'Unmute Mic'}</span>
-          </button>
-
-          {/* Explicit Send Answer Button */}
-          <button
-            onClick={() => submitTurn()}
-            disabled={isAgentSpeaking || isThinking}
-            type="button"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '11px 18px',
-              borderRadius: 99,
-              border: '1px solid rgba(244, 63, 94, 0.4)',
-              background: 'rgba(244, 63, 94, 0.15)',
-              color: '#fda4af',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: isAgentSpeaking || isThinking ? 'not-allowed' : 'pointer',
-              opacity: isAgentSpeaking || isThinking ? 0.5 : 1,
-            }}
-          >
-            <Send size={14} />
-            <span>{isThinking ? 'Evaluating...' : 'Send Answer'}</span>
           </button>
 
           {/* Type instead toggle */}
@@ -1074,42 +1132,73 @@ function LiveKitRoomWrapper({
           </button>
         </div>
 
-        {/* End & Evaluate Button */}
-        <button
-          onClick={() => {
-            if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
-            if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
-              try {
-                activeRecorderRef.current.stop();
-              } catch (_) {}
-            }
-            if (typeof window !== 'undefined' && window.speechSynthesis) {
-              window.speechSynthesis.cancel();
-            }
-            if (mediaStreamRef.current) {
-              mediaStreamRef.current.getTracks().forEach(t => t.stop());
-            }
-            onLeave();
-          }}
-          type="button"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '11px 26px',
-            borderRadius: 99,
-            border: 'none',
-            background: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
-            color: '#fff',
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: 'pointer',
-            boxShadow: '0 4px 16px rgba(225, 29, 72, 0.45)',
-          }}
-        >
-          <PhoneOff size={16} />
-          <span>End Interview & Evaluate</span>
-        </button>
+        {/* Action Controls on the Right: ONE rock-solid Send button + End button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* THE Single Stable Send Answer Button */}
+          <button
+            onClick={() => submitTurn()}
+            disabled={isAgentSpeaking || isThinking}
+            type="button"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '11px 22px',
+              borderRadius: 99,
+              border: isCandidateSpeaking ? '1px solid #f43f5e' : '1px solid rgba(99, 102, 241, 0.4)',
+              background: isCandidateSpeaking
+                ? 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)'
+                : 'linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(79, 70, 229, 0.25) 100%)',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: isAgentSpeaking || isThinking ? 'not-allowed' : 'pointer',
+              opacity: isAgentSpeaking || isThinking ? 0.45 : 1,
+              boxShadow: isCandidateSpeaking ? '0 0 16px rgba(244, 63, 94, 0.5)' : 'none',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <Send size={15} />
+            <span>{isThinking ? 'Evaluating...' : 'Send Answer'}</span>
+          </button>
+
+          {/* End & Evaluate Button */}
+          <button
+            onClick={() => {
+              if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
+              if (activeRecorderRef.current && activeRecorderRef.current.state === 'recording') {
+                try {
+                  activeRecorderRef.current.stop();
+                } catch (_) {}
+              }
+              if (typeof window !== 'undefined' && window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+              }
+              if (mediaStreamRef.current) {
+                mediaStreamRef.current.getTracks().forEach(t => t.stop());
+              }
+              onLeave();
+            }}
+            type="button"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '11px 24px',
+              borderRadius: 99,
+              border: 'none',
+              background: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(225, 29, 72, 0.45)',
+            }}
+          >
+            <PhoneOff size={15} />
+            <span>End & Evaluate</span>
+          </button>
+        </div>
       </div>
 
       {/* Collapsible Verified Turn Ledger Drawer */}
