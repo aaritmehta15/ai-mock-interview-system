@@ -66,10 +66,6 @@ _WHISPER_HALLUCINATIONS = {
     "subscribe to my channel",
     "bye",
     "bye.",
-    "you",
-    "you.",
-    "so",
-    "so...",
     "silence",
     "audio",
 }

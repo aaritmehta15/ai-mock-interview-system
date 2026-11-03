@@ -401,12 +401,14 @@ function LiveKitRoomWrapper({
           speechSafetyTimerRef.current = null;
         }
         setIsAgentSpeaking(false);
+        isAgentSpeakingRef.current = false;
         activeUtteranceRef.current = null;
         if (onEndCallback) onEndCallback();
       };
 
       utterance.onstart = () => {
         setIsAgentSpeaking(true);
+        isAgentSpeakingRef.current = true;
       };
 
       utterance.onend = completeSpeech;
@@ -421,13 +423,14 @@ function LiveKitRoomWrapper({
     } catch (err) {
       console.error('[speechSynthesis] playback failed:', err);
       setIsAgentSpeaking(false);
+      isAgentSpeakingRef.current = false;
       if (onEndCallback) onEndCallback();
     }
   }, [persona]);
 
   // Start Candidate Listening: Fresh isolated recorder for this turn only
   const startListening = useCallback(() => {
-    if (isAgentSpeakingRef.current || isConcludedRef.current || micMutedRef.current || isSubmittingRef.current) return;
+    if (isConcludedRef.current || micMutedRef.current || isSubmittingRef.current) return;
     if (!mediaStreamRef.current || !mediaStreamRef.current.active) return;
 
     // Reset turn buffers
@@ -514,7 +517,7 @@ function LiveKitRoomWrapper({
     let candidateText = (forcedText || '').trim();
 
     // If no manual text was provided, transcribe THIS turn's audio blob via Groq Whisper (~150ms)
-    if (!candidateText && turnAudioBlob && turnAudioBlob.size > 400) {
+    if (!candidateText && turnAudioBlob && turnAudioBlob.size > 200) {
       setStatusMessage('Transcribing speech via Groq Whisper (~150ms)...');
       try {
         const whisperResult = await transcribeAudio(turnAudioBlob);
@@ -529,18 +532,13 @@ function LiveKitRoomWrapper({
     // Clear the chunk buffer immediately after extracting audio so it never leaks
     activeTurnChunksRef.current = [];
 
-    // If still no valid speech detected (e.g. user paused to think or clicked Send without speaking):
+    // If speech was inaudible or empty, do NOT silently freeze!
+    // Set natural fallback text so the AI interviewer always responds aloud!
     if (!candidateText || isHallucination(candidateText)) {
-      setStatusMessage('Take all the time you need to think. Speak your answer, then click "Send Answer" (or press Space).');
-      setIsThinking(false);
-      isSubmittingRef.current = false;
-      setTimeout(() => {
-        startListeningRef.current();
-      }, 1600);
-      return;
+      candidateText = '[inaudible / faint audio]';
     }
 
-    // Update display with verbatim recognized speech
+    // Update display with recognized speech
     setLastTranscribedText(candidateText);
     setStatusMessage(`Evaluating response with ${persona?.name || 'interviewer'}...`);
 

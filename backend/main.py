@@ -424,14 +424,29 @@ async def interview_chat_endpoint(req: ChatTurnRequest):
     and returns AI interviewer's calibrated Socratic reply and next question.
     """
     try:
-        if not req.candidate_text or not req.candidate_text.strip():
-            return await chat_service.start_interview_session(
-                session_id=req.session_id,
-                persona_id=req.persona_id or "alex",
-            )
+        candidate_text = (req.candidate_text or "").strip()
+        if not candidate_text or candidate_text.lower() in (
+            "[inaudible]",
+            "[inaudible / faint audio]",
+            "[no speech detected]",
+        ):
+            prior_turns = ledger_service.get_session_turns(req.session_id)
+            cand_count = sum(1 for t in prior_turns if t.speaker == TurnSpeaker.CANDIDATE)
+            bp = get_blueprint(req.session_id) or build_fallback_blueprint("Technology Firm", "Software Engineer")
+            questions = bp.questions or []
+            curr_q = questions[cand_count - 1] if (cand_count > 0 and cand_count - 1 < len(questions)) else None
+            return {
+                "session_id": req.session_id,
+                "interviewer_text": "I didn't quite catch that through the audio. Could you please repeat that or walk me through your thinking?",
+                "stage": "in_progress",
+                "question_index": cand_count,
+                "current_question_text": curr_q.text if curr_q else None,
+                "is_finished": False,
+            }
+
         res = await chat_service.process_turn(
             session_id=req.session_id,
-            candidate_text=req.candidate_text,
+            candidate_text=candidate_text,
             persona_id=req.persona_id or "alex",
         )
         return res
@@ -461,10 +476,6 @@ _WHISPER_HALLUCINATIONS = {
     "subscribe to my channel",
     "bye",
     "bye.",
-    "you",
-    "you.",
-    "so",
-    "so...",
     "silence",
     "audio",
 }
@@ -474,11 +485,11 @@ def is_whisper_hallucination(text: str) -> bool:
     if not text:
         return True
     norm = re.sub(r"[^\w\s]", "", text.strip().lower())
-    if not norm or len(norm) <= 2:
+    if not norm:
         return True
     if norm in _WHISPER_HALLUCINATIONS:
         return True
-    if any(norm.startswith(h) for h in ["thanks for watching", "thank you for watching", "subtitles by"]):
+    if any(norm.startswith(h) for h in ["thanks for watching", "thank you for watching", "subtitles by", "amara.org"]):
         return True
     return False
 
