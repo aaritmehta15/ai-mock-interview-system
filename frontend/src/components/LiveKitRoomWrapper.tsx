@@ -10,6 +10,11 @@ import {
   MessageSquare,
   ChevronDown,
   ChevronUp,
+  Code,
+  HelpCircle,
+  Play,
+  Square,
+  Activity,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import LatencyTelemetry from './LatencyTelemetry';
@@ -17,6 +22,7 @@ import LatencyTelemetry from './LatencyTelemetry';
 import {
   startInterviewSession,
   sendInterviewTurn,
+  getTtsAudioUrl,
   type Persona,
 } from '../lib/api';
 
@@ -39,9 +45,15 @@ interface TurnRecord {
   text: string;
   timestamp: string;
   questionIndex?: number;
+  turnType?: string;
+  codeSnippet?: string | null;
+  wpm?: number | null;
+  fillerCount?: number | null;
 }
 
-// Voice matching helper for browser SpeechSynthesis
+const VERBAL_FILLER_REGEX = /\b(um|uh|like|basically|literally|you know|sort of|kind of|actually)\b/gi;
+
+// Voice matching fallback for browser SpeechSynthesis
 function selectPersonaVoice(voices: SpeechSynthesisVoice[], personaId?: string): SpeechSynthesisVoice | null {
   const englishVoices = voices.filter(v => v.lang.startsWith('en'));
   if (englishVoices.length === 0) return voices[0] || null;
@@ -94,10 +106,24 @@ function LiveKitRoomWrapper({
   const [micMuted, setMicMuted] = useState<boolean>(false);
   const [hasStarted, setHasStarted] = useState<boolean>(false);
 
+  // Advanced Feature 1 & 5 State: Telemetry and Code Scratchpad
+  const [rollingWpm, setRollingWpm] = useState<number>(0);
+  const [verbalFillerCount, setVerbalFillerCount] = useState<number>(0);
+  const [showScratchpad, setShowScratchpad] = useState<boolean>(false);
+  const [codeSnippet, setCodeSnippet] = useState<string>('');
+  const [scratchpadLang, setScratchpadLang] = useState<string>('Python');
+  const [playingTurnId, setPlayingTurnId] = useState<string | null>(null);
+
   // References
   const recognitionRef = useRef<any>(null);
   const shouldBeListeningRef = useRef<boolean>(false);
   const accumulatedFinalTextRef = useRef<string>('');
+  const speechStartTimeRef = useRef<number | null>(null);
+
+  // Web Audio API References for Neural TTS
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const currentSourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const audioCacheRef = useRef<Map<string, AudioBuffer>>(new Map());
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const speechSafetyTimerRef = useRef<any>(null);
   const keepAliveTimerRef = useRef<any>(null);
@@ -112,6 +138,21 @@ function LiveKitRoomWrapper({
   isConcludedRef.current = isConcluded;
   micMutedRef.current = micMuted;
 
+  // Initialize Web Audio Context
+  useEffect(() => {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      audioContextRef.current = new AudioContextClass();
+    }
+    return () => {
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        try {
+          audioContextRef.current.close();
+        } catch (_) {}
+      }
+    };
+  }, []);
+
   // Auto-scroll turn ledger drawer
   useEffect(() => {
     if (showTranscript) {
@@ -119,27 +160,61 @@ function LiveKitRoomWrapper({
     }
   }, [turns, showTranscript]);
 
-  // Chrome speech synthesis resume heartbeat
-  useEffect(() => {
-    const heartbeat = setInterval(() => {
-      if (typeof window !== 'undefined' && window.speechSynthesis?.speaking && window.speechSynthesis?.paused) {
-        window.speechSynthesis.resume();
-      }
-    }, 2000);
-    return () => clearInterval(heartbeat);
-  }, []);
-
   // Forward declarations for mutual referencing
   const startListeningRef = useRef<() => void>(() => {});
   const stopListeningRef = useRef<() => void>(() => {});
-  const submitTurnRef = useRef<(forcedText?: string) => Promise<void>>(async () => {});
+  const submitTurnRef = useRef<(forcedText?: string, turnType?: 'answer' | 'clarification') => Promise<void>>(async () => {});
+  const handleBargeInRef = useRef<() => void>(() => {});
 
-  // Global Spacebar shortcut to submit answer when not focused on an input
+  // Instant Barge-In / Interrupt Handler
+  const handleBargeIn = useCallback(() => {
+    if (!isAgentSpeakingRef.current) return;
+    console.log('[barge-in] User interrupted interviewer speech.');
+
+    // 1. Immediately kill Web Audio playback
+    if (currentSourceNodeRef.current) {
+      try {
+        currentSourceNodeRef.current.stop();
+      } catch (_) {}
+      currentSourceNodeRef.current = null;
+    }
+
+    // 2. Kill SpeechSynthesis fallback if running
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+
+    if (speechSafetyTimerRef.current) {
+      clearTimeout(speechSafetyTimerRef.current);
+      speechSafetyTimerRef.current = null;
+    }
+
+    setIsAgentSpeaking(false);
+    isAgentSpeakingRef.current = false;
+    setPlayingTurnId(null);
+    setStatusMessage('Interrupted. Mic is open — continue speaking.');
+
+    // 3. Immediately re-arm microphone
+    if (!micMutedRef.current && !isConcludedRef.current) {
+      startListeningRef.current();
+    }
+  }, []);
+
+  handleBargeInRef.current = handleBargeIn;
+
+  // Global Spacebar Shortcut:
+  // - If interviewer is speaking: instant barge-in!
+  // - If candidate is ready: submit turn!
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && (e.target as HTMLElement)?.tagName !== 'INPUT' && (e.target as HTMLElement)?.tagName !== 'TEXTAREA') {
+      const activeTag = (e.target as HTMLElement)?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+
+      if (e.code === 'Space') {
         e.preventDefault();
-        if (!isAgentSpeakingRef.current && !isSubmittingRef.current && !isConcludedRef.current) {
+        if (isAgentSpeakingRef.current) {
+          handleBargeInRef.current();
+        } else if (!isSubmittingRef.current && !isConcludedRef.current) {
           submitTurnRef.current();
         }
       }
@@ -161,7 +236,7 @@ function LiveKitRoomWrapper({
     const rec = new SpeechRecognitionClass();
     rec.continuous = true;
     rec.interimResults = true;
-    rec.lang = 'en-IN'; // Optimized for natural Indian English / global English accents
+    rec.lang = 'en-IN'; // Calibrated for global/Indian English accents
     rec.maxAlternatives = 1;
 
     rec.onstart = () => {
@@ -192,13 +267,30 @@ function LiveKitRoomWrapper({
       }
 
       setInterimTranscript(currentInterim);
-      const isSpeakingNow = Boolean(currentInterim.trim() || newlyFinalized.trim());
+      const fullUtterance = (accumulatedFinalTextRef.current + ' ' + currentInterim).trim();
+      const isSpeakingNow = Boolean(fullUtterance);
       setIsCandidateSpeaking(isSpeakingNow);
+
+      // Speech Telemetry Engine: Compute rolling WPM & verbal filler counts
+      if (isSpeakingNow) {
+        if (!speechStartTimeRef.current) {
+          speechStartTimeRef.current = Date.now();
+        }
+        const words = fullUtterance.split(/\s+/).filter(Boolean);
+        const elapsedMins = (Date.now() - speechStartTimeRef.current) / 60000;
+        if (elapsedMins > 0.03) {
+          const calculatedWpm = Math.min(240, Math.max(50, Math.round(words.length / elapsedMins)));
+          setRollingWpm(calculatedWpm);
+        }
+
+        // Count verbal fillers with regex
+        const matches = fullUtterance.match(VERBAL_FILLER_REGEX);
+        setVerbalFillerCount(matches ? matches.length : 0);
+      }
     };
 
     rec.onerror = (event: any) => {
       if (event.error === 'no-speech' || event.error === 'aborted') {
-        // Normal during conversational pauses — ignore
         return;
       }
       if (event.error === 'not-allowed') {
@@ -243,12 +335,13 @@ function LiveKitRoomWrapper({
     setIsCandidateSpeaking(false);
     setInterimTranscript('');
     setStatusMessage('');
+    speechStartTimeRef.current = Date.now();
 
     if (recognitionRef.current) {
       try {
         recognitionRef.current.start();
       } catch (err: any) {
-        // InvalidStateError means already started
+        // InvalidStateError means already running
       }
     }
   }, []);
@@ -267,42 +360,64 @@ function LiveKitRoomWrapper({
   startListeningRef.current = startListening;
   stopListeningRef.current = stopListening;
 
-  // Speak Utterance with Half-Duplex Guarantee (STT is completely killed while agent speaks)
-  const speakUtterance = useCallback((text: string, onEndCallback?: () => void) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) {
+  // Speak Utterance via High-Quality Microsoft Edge Neural TTS + Web Audio API
+  const speakUtterance = useCallback(async (text: string, onEndCallback?: () => void) => {
+    if (!text || !text.trim()) {
       if (onEndCallback) onEndCallback();
       return;
     }
 
     try {
-      // 1. Half-Duplex: Hard kill STT before AI speaks so AI's voice is NEVER transcribed
+      // 1. Half-Duplex: Hard kill STT before AI speaks so she never transcribes her own voice
       stopListeningRef.current();
 
-      window.speechSynthesis.cancel();
-      if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      activeUtteranceRef.current = utterance;
-
-      const voices = window.speechSynthesis.getVoices();
-      const chosenVoice = selectPersonaVoice(voices, persona?.id);
-      if (chosenVoice) {
-        utterance.voice = chosenVoice;
+      // Stop previous playback
+      if (currentSourceNodeRef.current) {
+        try {
+          currentSourceNodeRef.current.stop();
+        } catch (_) {}
+        currentSourceNodeRef.current = null;
+      }
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      if (speechSafetyTimerRef.current) {
+        clearTimeout(speechSafetyTimerRef.current);
+        speechSafetyTimerRef.current = null;
       }
 
-      if (persona?.id === 'marcus') {
-        utterance.pitch = 0.88;
-        utterance.rate = 1.02;
-      } else if (persona?.id === 'priya') {
-        utterance.pitch = 1.08;
-        utterance.rate = 1.06;
-      } else {
-        utterance.pitch = 1.0;
-        utterance.rate = 1.0;
+      setIsAgentSpeaking(true);
+      isAgentSpeakingRef.current = true;
+
+      // Ensure AudioContext is running (requires user interaction)
+      const ctx = audioContextRef.current;
+      if (ctx && ctx.state === 'suspended') {
+        await ctx.resume();
       }
 
-      const wordCount = text.split(/\s+/).filter(Boolean).length;
-      const estimatedDurationMs = Math.max(2000, (wordCount / 2.3) * 1000 + 1200);
+      const pId = persona?.id || 'alex';
+      const cacheKey = `${pId}:${text.trim()}`;
+
+      let audioBuffer: AudioBuffer | null = null;
+      if (audioCacheRef.current.has(cacheKey)) {
+        audioBuffer = audioCacheRef.current.get(cacheKey) || null;
+      }
+
+      if (!audioBuffer && ctx) {
+        try {
+          const ttsUrl = getTtsAudioUrl(text, pId);
+          const resp = await fetch(ttsUrl);
+          if (resp.ok) {
+            const arrayBuffer = await resp.arrayBuffer();
+            if (arrayBuffer.byteLength > 500) {
+              audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+              audioCacheRef.current.set(cacheKey, audioBuffer);
+            }
+          }
+        } catch (fetchErr) {
+          console.warn('[tts] Neural TTS fetch failed, falling back to browser SpeechSynthesis:', fetchErr);
+        }
+      }
 
       let hasCompleted = false;
       const completeSpeech = () => {
@@ -314,7 +429,7 @@ function LiveKitRoomWrapper({
         }
         setIsAgentSpeaking(false);
         isAgentSpeakingRef.current = false;
-        activeUtteranceRef.current = null;
+        setPlayingTurnId(null);
 
         // Half-Duplex: 350ms settle window after AI finishes speaking, then re-arm STT
         setTimeout(() => {
@@ -325,53 +440,96 @@ function LiveKitRoomWrapper({
         }, 350);
       };
 
-      utterance.onstart = () => {
-        setIsAgentSpeaking(true);
-        isAgentSpeakingRef.current = true;
-      };
+      // 2. Play via Web Audio API if buffer acquired
+      if (audioBuffer && ctx) {
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+        currentSourceNodeRef.current = source;
 
-      utterance.onend = completeSpeech;
-      utterance.onerror = completeSpeech;
+        source.onended = completeSpeech;
+        const safetyDurationMs = Math.round(audioBuffer.duration * 1000) + 1200;
+        speechSafetyTimerRef.current = setTimeout(completeSpeech, safetyDurationMs);
 
-      speechSafetyTimerRef.current = setTimeout(completeSpeech, estimatedDurationMs);
+        source.start(0);
+        return;
+      }
 
-      window.speechSynthesis.speak(utterance);
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
+      // 3. Graceful Fallback: Browser SpeechSynthesis
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        activeUtteranceRef.current = utterance;
+
+        const voices = window.speechSynthesis.getVoices();
+        const chosenVoice = selectPersonaVoice(voices, pId);
+        if (chosenVoice) utterance.voice = chosenVoice;
+
+        utterance.onstart = () => {
+          setIsAgentSpeaking(true);
+          isAgentSpeakingRef.current = true;
+        };
+        utterance.onend = completeSpeech;
+        utterance.onerror = completeSpeech;
+
+        const wordCount = text.split(/\s+/).filter(Boolean).length;
+        const estimatedDurationMs = Math.max(2000, (wordCount / 2.3) * 1000 + 1200);
+        speechSafetyTimerRef.current = setTimeout(completeSpeech, estimatedDurationMs);
+
+        window.speechSynthesis.speak(utterance);
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } else {
+        completeSpeech();
       }
     } catch (err) {
-      console.error('[speechSynthesis] playback failed:', err);
+      console.error('[tts] Playback pipeline error:', err);
       setIsAgentSpeaking(false);
       isAgentSpeakingRef.current = false;
       if (onEndCallback) onEndCallback();
     }
   }, [persona]);
 
-  // Bulletproof Candidate Turn Submission
-  const submitTurn = useCallback(async (forcedText?: string) => {
+  // Turn Replay function for the ledger drawer
+  const playTurnAudio = useCallback((turnId: string, text: string) => {
+    setPlayingTurnId(turnId);
+    speakUtterance(text, () => {
+      setPlayingTurnId(null);
+    });
+  }, [speakUtterance]);
+
+  // Bulletproof Candidate Turn Submission (Answers & Clarification Requests)
+  const submitTurn = useCallback(async (forcedText?: string, turnType: 'answer' | 'clarification' = 'answer') => {
     if (isSubmittingRef.current || !sessionId) return;
     isSubmittingRef.current = true;
     setIsThinking(true);
-    setStatusMessage('Evaluating your response...');
+    setStatusMessage(turnType === 'clarification' ? 'Requesting Socratic clarification...' : 'Evaluating response against blueprint...');
 
     // 1. Immediately abort STT so no further audio leaks
     stopListeningRef.current();
 
-    // 2. Resolve candidate text: either forced, or accumulated finalized + any trailing interim speech
+    // 2. Resolve candidate text: either forced, or accumulated finalized + trailing interim speech
     let candidateText = (forcedText || '').trim();
     if (!candidateText) {
       const fullRecognized = (accumulatedFinalTextRef.current + ' ' + (interimTranscript || '')).trim();
       candidateText = fullRecognized;
     }
 
+    // Telemetry capture for this turn
+    const turnWpm = rollingWpm > 0 ? rollingWpm : 140.0;
+    const turnFillers = verbalFillerCount;
+    const currentCode = codeSnippet.trim() ? codeSnippet.trim() : null;
+
     // Reset turn buffers for next exchange
     accumulatedFinalTextRef.current = '';
     setSpokenAnswer('');
     setInterimTranscript('');
+    speechStartTimeRef.current = null;
 
-    // If candidate clicked Send Answer with zero speech, prompt them naturally
-    if (!candidateText) {
-      candidateText = '[inaudible / faint audio]';
+    if (!candidateText && !currentCode) {
+      candidateText = turnType === 'clarification'
+        ? 'Could you clarify the constraints or give a hint?'
+        : '[inaudible / faint audio]';
     }
 
     // Record candidate turn in local ledger
@@ -381,6 +539,10 @@ function LiveKitRoomWrapper({
       text: candidateText,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       questionIndex: currentQuestionIndex,
+      turnType: turnType,
+      codeSnippet: currentCode,
+      wpm: turnWpm,
+      fillerCount: turnFillers,
     };
     setTurns(prev => [...prev, candRecord]);
 
@@ -389,6 +551,10 @@ function LiveKitRoomWrapper({
         session_id: sessionId,
         candidate_text: candidateText,
         persona_id: persona?.id || 'alex',
+        turn_type: turnType,
+        code_snippet: currentCode,
+        wpm: turnWpm,
+        filler_count: turnFillers,
       });
 
       setIsThinking(false);
@@ -402,6 +568,7 @@ function LiveKitRoomWrapper({
         text: res.interviewer_text,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         questionIndex: res.question_index,
+        turnType: turnType,
       };
       setTurns(prev => [...prev, aiRecord]);
 
@@ -413,7 +580,7 @@ function LiveKitRoomWrapper({
         setIsConcluded(true);
         speakUtterance(res.interviewer_text);
       } else {
-        // Speak interviewer reply, which automatically re-arms STT upon completion!
+        // Speak interviewer reply in crisp neural voice, which automatically re-arms STT upon finish!
         speakUtterance(res.interviewer_text);
       }
     } catch (err) {
@@ -424,7 +591,7 @@ function LiveKitRoomWrapper({
       const fallbackReply = "That's an interesting point. Let's dig deeper into the system trade-offs and failure modes.";
       speakUtterance(fallbackReply);
     }
-  }, [sessionId, currentQuestionIndex, persona, interimTranscript, speakUtterance]);
+  }, [sessionId, currentQuestionIndex, persona, interimTranscript, rollingWpm, verbalFillerCount, codeSnippet, speakUtterance]);
 
   submitTurnRef.current = submitTurn;
 
@@ -459,10 +626,11 @@ function LiveKitRoomWrapper({
           text: res.interviewer_text,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
           questionIndex: 0,
+          turnType: 'greeting',
         };
         setTurns([greetingRecord]);
 
-        // Speak greeting aloud -> Automatically arms Chrome STT after +350ms settle window!
+        // Speak greeting aloud via Edge Neural TTS
         speakUtterance(res.interviewer_text);
       } catch (err) {
         console.error('[interview] Failed to start session greeting:', err);
@@ -478,6 +646,11 @@ function LiveKitRoomWrapper({
     return () => {
       if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
       stopListeningRef.current();
+      if (currentSourceNodeRef.current) {
+        try {
+          currentSourceNodeRef.current.stop();
+        } catch (_) {}
+      }
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
@@ -514,9 +687,9 @@ function LiveKitRoomWrapper({
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      gap: 20,
+      gap: 18,
       width: '100%',
-      maxWidth: 840,
+      maxWidth: 880,
       margin: '0 auto',
       padding: '28px 32px',
       background: 'var(--surface-1, #0f121a)',
@@ -530,7 +703,7 @@ function LiveKitRoomWrapper({
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: persona?.accent_color || '#818cf8', textTransform: 'uppercase' }}>
-              Chrome Web Speech Studio (en-IN)
+              Edge Neural Audio Studio (24kHz)
             </span>
             <span style={{ color: '#475569' }}>•</span>
             <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace" }}>
@@ -632,6 +805,31 @@ function LiveKitRoomWrapper({
             <span style={{ color: '#94a3b8' }}>{persona.archetype || persona.title}</span>
           </div>
         )}
+
+        {/* Feature 1: Live Speech Telemetry HUD Pill */}
+        <div style={{
+          position: 'absolute',
+          top: 14,
+          right: 16,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '4px 12px',
+          background: 'rgba(15, 23, 42, 0.8)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: 99,
+          fontSize: 11,
+          fontFamily: "'JetBrains Mono', monospace",
+          color: '#cbd5e1',
+          zIndex: 3,
+        }}>
+          <Activity size={13} color="#10b981" />
+          <span>{rollingWpm > 0 ? `${rollingWpm} WPM` : '140 WPM'}</span>
+          <span style={{ color: '#475569' }}>|</span>
+          <span style={{ color: verbalFillerCount > 2 ? '#f59e0b' : '#94a3b8' }}>
+            {verbalFillerCount} filler{verbalFillerCount === 1 ? '' : 's'}
+          </span>
+        </div>
 
         {/* Dynamic Glow Halo */}
         <motion.div
@@ -749,7 +947,7 @@ function LiveKitRoomWrapper({
               : isThinking
               ? (statusMessage || `⚡ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS EVALUATING...`)
               : isAgentSpeaking
-              ? `🎙️ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS SPEAKING`
+              ? `🎙️ ${persona?.name?.toUpperCase() || 'AI INTERVIEWER'} IS SPEAKING · SPACE TO INTERRUPT`
               : isCandidateSpeaking
               ? '🗣️ CANDIDATE SPEAKING (LIVE STREAMING STT)'
               : micMuted
@@ -865,6 +1063,98 @@ function LiveKitRoomWrapper({
         </div>
       </div>
 
+      {/* Feature 5: Synchronized Architecture & Code Scratchpad Drawer */}
+      <AnimatePresence>
+        {showScratchpad && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            style={{
+              padding: '16px 20px',
+              background: 'rgba(10, 13, 22, 0.95)',
+              borderRadius: 16,
+              border: '1px solid rgba(99, 102, 241, 0.35)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Code size={16} color="#818cf8" />
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc' }}>
+                  Synchronized Architecture & Code Scratchpad
+                </span>
+                <span style={{ fontSize: 11, color: '#64748b' }}>
+                  (Evaluated alongside speech)
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <select
+                  value={scratchpadLang}
+                  onChange={(e) => setScratchpadLang(e.target.value)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    borderRadius: 6,
+                    padding: '3px 8px',
+                    color: '#cbd5e1',
+                    fontSize: 12,
+                    outline: 'none',
+                  }}
+                >
+                  <option value="Python">Python</option>
+                  <option value="TypeScript">TypeScript</option>
+                  <option value="Go">Go</option>
+                  <option value="Java">Java</option>
+                  <option value="SQL">SQL</option>
+                  <option value="ASCII Architecture">ASCII Architecture</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setCodeSnippet('')}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#94a3b8',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <textarea
+              value={codeSnippet}
+              onChange={(e) => setCodeSnippet(e.target.value)}
+              placeholder={`// Write your ${scratchpadLang} code or sketch ASCII architecture diagrams here...\n// It will be sent automatically with your spoken answer and evaluated.`}
+              rows={7}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                background: 'rgba(0, 0, 0, 0.45)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                borderRadius: 8,
+                padding: '12px 14px',
+                color: '#e2e8f0',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 12.5,
+                lineHeight: 1.5,
+                outline: 'none',
+                resize: 'vertical',
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b' }}>
+              <span>{codeSnippet.split('\n').length} lines · {codeSnippet.length} characters</span>
+              <span>✓ Auto-attached to next turn</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Manual Input Fallback Drawer */}
       <AnimatePresence>
         {showManualInput && (
@@ -925,9 +1215,9 @@ function LiveKitRoomWrapper({
         )}
       </AnimatePresence>
 
-      {/* Primary Interactive Action Bar (Fixed, rock-solid layout: NEVER jumps!) */}
+      {/* Primary Interactive Action Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
           {/* Mute/Unmute Mic */}
           <button
             onClick={toggleMic}
@@ -936,7 +1226,7 @@ function LiveKitRoomWrapper({
               display: 'flex',
               alignItems: 'center',
               gap: 8,
-              padding: '11px 20px',
+              padding: '10px 18px',
               borderRadius: 99,
               border: !micMuted ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(244, 63, 94, 0.4)',
               background: !micMuted ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
@@ -948,7 +1238,56 @@ function LiveKitRoomWrapper({
             }}
           >
             {!micMuted ? <Mic size={16} /> : <MicOff size={16} />}
-            <span>{!micMuted ? 'Mute Mic' : 'Unmute Mic'}</span>
+            <span>{!micMuted ? 'Mute' : 'Unmute'}</span>
+          </button>
+
+          {/* Feature 2: Socratic Clarification / Hint Button */}
+          <button
+            onClick={() => submitTurn(undefined, 'clarification')}
+            disabled={isAgentSpeaking || isThinking || currentQuestionIndex === 0}
+            type="button"
+            title="Ask a clarifying question or request a constraint hint without burning a turn"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '10px 16px',
+              borderRadius: 99,
+              border: '1px solid rgba(245, 158, 11, 0.35)',
+              background: 'rgba(245, 158, 11, 0.12)',
+              color: '#f59e0b',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: isAgentSpeaking || isThinking || currentQuestionIndex === 0 ? 'not-allowed' : 'pointer',
+              opacity: isAgentSpeaking || isThinking || currentQuestionIndex === 0 ? 0.45 : 1,
+            }}
+          >
+            <HelpCircle size={15} />
+            <span>Hint / Clarify</span>
+          </button>
+
+          {/* Feature 5 Toggle: Code Scratchpad */}
+          <button
+            onClick={() => setShowScratchpad(!showScratchpad)}
+            type="button"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '10px 16px',
+              borderRadius: 99,
+              border: showScratchpad || codeSnippet.trim() ? '1px solid rgba(99, 102, 241, 0.6)' : '1px solid rgba(255, 255, 255, 0.12)',
+              background: showScratchpad || codeSnippet.trim() ? 'rgba(99, 102, 241, 0.18)' : 'rgba(255, 255, 255, 0.05)',
+              color: showScratchpad || codeSnippet.trim() ? '#a5b4fc' : '#cbd5e1',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            <Code size={15} />
+            <span>Code Scratchpad</span>
+            {codeSnippet.trim() && (
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#6366f1' }} />
+            )}
           </button>
 
           {/* Type instead toggle */}
@@ -959,7 +1298,7 @@ function LiveKitRoomWrapper({
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              padding: '11px 16px',
+              padding: '10px 16px',
               borderRadius: 99,
               border: '1px solid rgba(255, 255, 255, 0.12)',
               background: 'rgba(255, 255, 255, 0.05)',
@@ -968,7 +1307,7 @@ function LiveKitRoomWrapper({
               cursor: 'pointer',
             }}
           >
-            <span>💬 Type Instead</span>
+            <span>💬 Type</span>
           </button>
 
           {/* Toggle Ledger Drawer */}
@@ -979,7 +1318,7 @@ function LiveKitRoomWrapper({
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              padding: '11px 16px',
+              padding: '10px 16px',
               borderRadius: 99,
               border: '1px solid rgba(255, 255, 255, 0.12)',
               background: 'rgba(255, 255, 255, 0.05)',
@@ -994,42 +1333,73 @@ function LiveKitRoomWrapper({
           </button>
         </div>
 
-        {/* Action Controls on the Right: ONE rock-solid Send button + End button */}
+        {/* Action Controls on the Right: Send Answer / Interrupt + End */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* THE Single Stable Send Answer Button */}
-          <button
-            onClick={() => submitTurn()}
-            disabled={isAgentSpeaking || isThinking}
-            type="button"
-            title="Click or press Spacebar to submit your answer"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '11px 24px',
-              borderRadius: 99,
-              border: isCandidateSpeaking || livePreviewText ? '1px solid #f43f5e' : '1px solid rgba(99, 102, 241, 0.4)',
-              background: isCandidateSpeaking || livePreviewText
-                ? 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)'
-                : 'linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(79, 70, 229, 0.3) 100%)',
-              color: '#fff',
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: isAgentSpeaking || isThinking ? 'not-allowed' : 'pointer',
-              opacity: isAgentSpeaking || isThinking ? 0.45 : 1,
-              boxShadow: isCandidateSpeaking || livePreviewText ? '0 0 18px rgba(244, 63, 94, 0.5)' : '0 0 12px rgba(99, 102, 241, 0.2)',
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <Send size={15} />
-            <span>{isThinking ? 'Evaluating...' : 'Send Answer (Space)'}</span>
-          </button>
+          {/* Barge-In / Interrupt Button (when AI is speaking) */}
+          {isAgentSpeaking ? (
+            <button
+              onClick={handleBargeIn}
+              type="button"
+              title="Interrupt interviewer speech immediately and open mic"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '11px 22px',
+                borderRadius: 99,
+                border: '1px solid #f59e0b',
+                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 0 16px rgba(245, 158, 11, 0.4)',
+              }}
+            >
+              <Square size={14} fill="#fff" />
+              <span>Interrupt (Space)</span>
+            </button>
+          ) : (
+            /* Send Answer Button */
+            <button
+              onClick={() => submitTurn()}
+              disabled={isAgentSpeaking || isThinking}
+              type="button"
+              title="Click or press Spacebar to submit your answer"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '11px 24px',
+                borderRadius: 99,
+                border: isCandidateSpeaking || livePreviewText ? '1px solid #f43f5e' : '1px solid rgba(99, 102, 241, 0.4)',
+                background: isCandidateSpeaking || livePreviewText
+                  ? 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)'
+                  : 'linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(79, 70, 229, 0.3) 100%)',
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: isAgentSpeaking || isThinking ? 'not-allowed' : 'pointer',
+                opacity: isAgentSpeaking || isThinking ? 0.45 : 1,
+                boxShadow: isCandidateSpeaking || livePreviewText ? '0 0 18px rgba(244, 63, 94, 0.5)' : '0 0 12px rgba(99, 102, 241, 0.2)',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <Send size={15} />
+              <span>{isThinking ? 'Evaluating...' : 'Send Answer (Space)'}</span>
+            </button>
+          )}
 
           {/* End & Evaluate Button */}
           <button
             onClick={() => {
               if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
               stopListeningRef.current();
+              if (currentSourceNodeRef.current) {
+                try {
+                  currentSourceNodeRef.current.stop();
+                } catch (_) {}
+              }
               if (typeof window !== 'undefined' && window.speechSynthesis) {
                 window.speechSynthesis.cancel();
               }
@@ -1057,7 +1427,7 @@ function LiveKitRoomWrapper({
         </div>
       </div>
 
-      {/* Collapsible Verified Turn Ledger Drawer */}
+      {/* Feature 3 & 4: Collapsible Verified Turn Ledger Drawer with Audio Replay */}
       <AnimatePresence>
         {showTranscript && (
           <motion.div
@@ -1067,10 +1437,10 @@ function LiveKitRoomWrapper({
             style={{
               marginTop: 6,
               padding: '16px 20px',
-              background: 'rgba(10, 13, 20, 0.85)',
+              background: 'rgba(10, 13, 20, 0.95)',
               border: '1px solid rgba(255, 255, 255, 0.1)',
               borderRadius: 16,
-              maxHeight: 280,
+              maxHeight: 320,
               overflowY: 'auto',
             }}
           >
@@ -1093,7 +1463,7 @@ function LiveKitRoomWrapper({
                   <div
                     key={t.id}
                     style={{
-                      padding: '8px 12px',
+                      padding: '10px 14px',
                       borderRadius: 10,
                       background: t.speaker === 'interviewer' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(244, 63, 94, 0.08)',
                       borderLeft: t.speaker === 'interviewer'
@@ -1101,21 +1471,73 @@ function LiveKitRoomWrapper({
                         : '3px solid #f43f5e',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                      <span style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: t.speaker === 'interviewer' ? (persona?.accent_color || '#818cf8') : '#f43f5e',
-                      }}>
-                        {t.speaker === 'interviewer' ? (persona?.name || 'AI Interviewer') : 'Candidate'}
-                      </span>
-                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }}>
-                        {t.timestamp}
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: t.speaker === 'interviewer' ? (persona?.accent_color || '#818cf8') : '#f43f5e',
+                        }}>
+                          {t.speaker === 'interviewer' ? (persona?.name || 'AI Interviewer') : 'Candidate'}
+                        </span>
+                        {t.turnType === 'clarification' && (
+                          <span style={{
+                            fontSize: 10,
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                            background: 'rgba(245, 158, 11, 0.2)',
+                            color: '#f59e0b',
+                            fontWeight: 600,
+                          }}>
+                            Clarification
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {t.speaker === 'interviewer' && (
+                          <button
+                            type="button"
+                            onClick={() => playTurnAudio(t.id, t.text)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              background: 'rgba(255, 255, 255, 0.06)',
+                              border: '1px solid rgba(255, 255, 255, 0.12)',
+                              borderRadius: 4,
+                              padding: '2px 8px',
+                              color: playingTurnId === t.id ? '#10b981' : '#cbd5e1',
+                              fontSize: 11,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Play size={10} fill={playingTurnId === t.id ? '#10b981' : 'none'} />
+                            <span>{playingTurnId === t.id ? 'Playing...' : 'Play'}</span>
+                          </button>
+                        )}
+                        <span style={{ fontSize: 10, color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }}>
+                          {t.timestamp}
+                        </span>
+                      </div>
                     </div>
                     <p style={{ margin: 0, fontSize: 13, color: '#e2e8f0', lineHeight: 1.45 }}>
                       {t.text}
                     </p>
+                    {t.codeSnippet && (
+                      <pre style={{
+                        marginTop: 8,
+                        padding: '8px 10px',
+                        background: 'rgba(0, 0, 0, 0.4)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: 6,
+                        color: '#93c5fd',
+                        fontSize: 11.5,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        overflowX: 'auto',
+                      }}>
+                        {t.codeSnippet}
+                      </pre>
+                    )}
                   </div>
                 ))
               )}

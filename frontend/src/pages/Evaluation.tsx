@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -13,11 +13,16 @@ import {
   Terminal,
   Loader2,
   History as HistoryIcon,
+  Volume2,
+  Play,
+  Square,
+  Activity,
 } from 'lucide-react';
 import { useInterview } from '../context/InterviewContext';
 import {
   evaluateSession,
   getLedger,
+  getTtsAudioUrl,
   type EvaluationReport,
   type LedgerAuditResponse,
 } from '../lib/api';
@@ -45,6 +50,28 @@ export default function Evaluation() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [expandedQuestions, setExpandedQuestions] = useState<Record<string, boolean>>({});
   const [showLedgerDrawer, setShowLedgerDrawer] = useState<boolean>(false);
+  const [isPlayingDebrief, setIsPlayingDebrief] = useState<boolean>(false);
+  const debriefAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const togglePlayDebrief = (text: string) => {
+    if (!text) return;
+    if (isPlayingDebrief && debriefAudioRef.current) {
+      debriefAudioRef.current.pause();
+      setIsPlayingDebrief(false);
+      return;
+    }
+
+    const ttsUrl = getTtsAudioUrl(text, 'alex');
+    if (!debriefAudioRef.current) {
+      debriefAudioRef.current = new Audio(ttsUrl);
+      debriefAudioRef.current.onended = () => setIsPlayingDebrief(false);
+      debriefAudioRef.current.onerror = () => setIsPlayingDebrief(false);
+    } else {
+      debriefAudioRef.current.src = ttsUrl;
+    }
+    debriefAudioRef.current.play().catch(e => console.warn('Audio play error:', e));
+    setIsPlayingDebrief(true);
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -527,6 +554,97 @@ export default function Evaluation() {
           </div>
         </div>
       </div>
+
+      {/* Feature 6: Executive Spoken Debrief & Neural Audio Playback */}
+      {report.executive_spoken_debrief && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="studio-card"
+          style={{
+            padding: 24,
+            background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(16, 185, 129, 0.05) 100%)',
+            border: '1px solid rgba(99, 102, 241, 0.3)',
+            borderRadius: 16,
+            marginBottom: 28,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Volume2 size={18} color="#818cf8" />
+              <h3 style={{ fontSize: 15, fontWeight: 700, color: '#f8fafc', margin: 0 }}>
+                Executive Spoken Debrief (Neural Audio)
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => togglePlayDebrief(report.executive_spoken_debrief!)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 14px',
+                borderRadius: 99,
+                background: isPlayingDebrief ? 'rgba(244, 63, 94, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                border: isPlayingDebrief ? '1px solid #f43f5e' : '1px solid #10b981',
+                color: isPlayingDebrief ? '#f43f5e' : '#10b981',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {isPlayingDebrief ? <Square size={13} fill="#f43f5e" /> : <Play size={13} fill="#10b981" />}
+              <span>{isPlayingDebrief ? 'Pause Debrief' : 'Listen to Debrief'}</span>
+            </button>
+          </div>
+          <p style={{ margin: 0, fontSize: 13.5, color: '#cbd5e1', lineHeight: 1.6 }}>
+            "{report.executive_spoken_debrief}"
+          </p>
+        </motion.div>
+      )}
+
+      {/* Feature 1: Verbal Pacing & Speech Telemetry Card */}
+      {report.communication_telemetry && (
+        <div
+          className="studio-card"
+          style={{
+            padding: 20,
+            background: 'rgba(15, 23, 42, 0.6)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: 16,
+            marginBottom: 28,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: 16,
+            alignItems: 'center',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>
+              <Activity size={14} color="#10b981" />
+              <span>AVERAGE SPEECH PACING</span>
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#f8fafc', fontFamily: "'Space Grotesk', sans-serif" }}>
+              {report.communication_telemetry.average_wpm} <span style={{ fontSize: 12, color: '#64748b' }}>WPM</span>
+            </div>
+            <div style={{ fontSize: 11, color: '#10b981', marginTop: 2 }}>
+              {report.communication_telemetry.wpm_rating}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>
+              VERBAL FILLER WORDS (UM / UH / LIKE)
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#f8fafc', fontFamily: "'Space Grotesk', sans-serif" }}>
+              {report.communication_telemetry.total_fillers} <span style={{ fontSize: 12, color: '#64748b' }}>occurrences</span>
+            </div>
+            <div style={{ fontSize: 11, color: report.communication_telemetry.filler_density > 3 ? '#f59e0b' : '#94a3b8', marginTop: 2 }}>
+              Density: {report.communication_telemetry.filler_density} fillers / 100 words
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Chronological Turn Ledger Drawer (Audit Inspector) */}
       {showLedgerDrawer && (

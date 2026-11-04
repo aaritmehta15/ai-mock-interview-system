@@ -108,6 +108,13 @@ export interface QuestionEvaluation {
   actionable_coaching?: string;
 }
 
+export interface CommunicationTelemetry {
+  average_wpm: number;
+  total_fillers: number;
+  wpm_rating: string;
+  filler_density: number;
+}
+
 export interface EvaluationReport {
   session_id: string;
   company?: string;
@@ -131,6 +138,8 @@ export interface EvaluationReport {
   created_at?: string;
   evaluated_at?: string;
   blueprint_id?: string;
+  executive_spoken_debrief?: string | null;
+  communication_telemetry?: CommunicationTelemetry | null;
 }
 
 export interface TurnEvent {
@@ -144,6 +153,10 @@ export interface TurnEvent {
   confidence: number;
   timestamp: string;
   verified: boolean;
+  turn_type?: string;
+  code_snippet?: string | null;
+  wpm?: number | null;
+  filler_count?: number | null;
 }
 
 export interface LedgerAuditResponse {
@@ -279,7 +292,16 @@ export const sendInterviewTurn = (payload: {
   session_id: string;
   candidate_text: string;
   persona_id?: string;
+  turn_type?: 'answer' | 'clarification';
+  code_snippet?: string | null;
+  wpm?: number | null;
+  filler_count?: number | null;
 }): Promise<InterviewChatResponse> => api.post('/api/interview/chat', payload).then(r => r.data);
+
+export const getTtsAudioUrl = (text: string, personaId: string = 'alex'): string => {
+  const encoded = encodeURIComponent(text.trim());
+  return `${BASE}/api/tts?text=${encoded}&persona_id=${encodeURIComponent(personaId)}`;
+};
 
 export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
   const formData = new FormData();
