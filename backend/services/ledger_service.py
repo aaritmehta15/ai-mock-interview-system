@@ -44,7 +44,7 @@ def _get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Initialize the SQLite append-only turns table and sessions index table."""
+    """Initialize the SQLite append-only turns table and sessions index table, migrating missing columns."""
     conn = _get_connection()
     try:
         with conn:
@@ -59,10 +59,26 @@ def init_db() -> None:
                     word_count INTEGER NOT NULL,
                     confidence REAL NOT NULL,
                     timestamp TEXT NOT NULL,
-                    verified INTEGER NOT NULL
+                    verified INTEGER NOT NULL,
+                    turn_type TEXT NOT NULL DEFAULT 'answer',
+                    code_snippet TEXT,
+                    wpm REAL,
+                    filler_count INTEGER
                 );
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id, timestamp);")
+
+            # Safe automated schema migration for existing SQLite databases
+            col_info = conn.execute("PRAGMA table_info(turns);").fetchall()
+            existing_cols = {row["name"] for row in col_info}
+            if "turn_type" not in existing_cols:
+                conn.execute("ALTER TABLE turns ADD COLUMN turn_type TEXT NOT NULL DEFAULT 'answer';")
+            if "code_snippet" not in existing_cols:
+                conn.execute("ALTER TABLE turns ADD COLUMN code_snippet TEXT;")
+            if "wpm" not in existing_cols:
+                conn.execute("ALTER TABLE turns ADD COLUMN wpm REAL;")
+            if "filler_count" not in existing_cols:
+                conn.execute("ALTER TABLE turns ADD COLUMN filler_count INTEGER;")
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -126,6 +142,10 @@ def record_turn(
     confidence: float = 1.0,
     timestamp: Optional[str] = None,
     turn_id: Optional[str] = None,
+    turn_type: str = "answer",
+    code_snippet: Optional[str] = None,
+    wpm: Optional[float] = None,
+    filler_count: Optional[int] = None,
 ) -> TurnEvent:
     """
     Append an immutable turn event into the SQLite Turn Ledger.
@@ -157,6 +177,10 @@ def record_turn(
         confidence=confidence,
         timestamp=ts,
         verified=verified,
+        turn_type=turn_type,
+        code_snippet=code_snippet,
+        wpm=wpm,
+        filler_count=filler_count,
     )
 
     conn = _get_connection()
@@ -165,8 +189,9 @@ def record_turn(
             conn.execute("""
                 INSERT OR REPLACE INTO turns (
                     turn_id, session_id, speaker, role, question_index,
-                    text, word_count, confidence, timestamp, verified
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    text, word_count, confidence, timestamp, verified,
+                    turn_type, code_snippet, wpm, filler_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 turn.turn_id,
                 turn.session_id,
@@ -178,6 +203,10 @@ def record_turn(
                 turn.confidence,
                 turn.timestamp,
                 1 if turn.verified else 0,
+                turn.turn_type,
+                turn.code_snippet,
+                turn.wpm,
+                turn.filler_count,
             ))
             # Keep turn_count and updated_at fresh in sessions index
             conn.execute("""
@@ -189,8 +218,8 @@ def record_turn(
     finally:
         conn.close()
 
-    logger.debug("[ledger] Recorded turn %s in session %s (Speaker: %s, Words: %d, Verified: %s)",
-                 turn.turn_id, session_id, turn.speaker.value, word_count, verified)
+    logger.debug("[ledger] Recorded turn %s in session %s (Speaker: %s, Words: %d, Verified: %s, Type: %s)",
+                 turn.turn_id, session_id, turn.speaker.value, word_count, verified, turn_type)
     return turn
 
 
@@ -305,6 +334,7 @@ def get_session_turns(session_id: str) -> List[TurnEvent]:
             "SELECT * FROM turns WHERE session_id = ? ORDER BY timestamp ASC, rowid ASC",
             (session_id,)
         ).fetchall()
+        col_names = set(rows[0].keys()) if rows else set()
         return [
             TurnEvent(
                 turn_id=row["turn_id"],
@@ -317,6 +347,10 @@ def get_session_turns(session_id: str) -> List[TurnEvent]:
                 confidence=row["confidence"],
                 timestamp=row["timestamp"],
                 verified=bool(row["verified"]),
+                turn_type=row["turn_type"] if "turn_type" in col_names else "answer",
+                code_snippet=row["code_snippet"] if "code_snippet" in col_names else None,
+                wpm=float(row["wpm"]) if ("wpm" in col_names and row["wpm"] is not None) else None,
+                filler_count=int(row["filler_count"]) if ("filler_count" in col_names and row["filler_count"] is not None) else None,
             )
             for row in rows
         ]
@@ -360,7 +394,13 @@ def compute_session_hash(session_id: str) -> str:
 
     hasher = hashlib.sha256()
     for turn in turns:
-        segment = f"{turn.turn_id}|{turn.speaker.value}|{turn.question_index}|{turn.text}|{turn.timestamp}"
+        wpm_str = f"{turn.wpm:.1f}" if turn.wpm is not None else "0.0"
+        filler_str = str(turn.filler_count) if turn.filler_count is not None else "0"
+        segment = (
+            f"{turn.turn_id}|{turn.speaker.value}|{turn.question_index}|"
+            f"{turn.text}|{turn.turn_type}|{turn.code_snippet or ''}|"
+            f"{wpm_str}|{filler_str}|{turn.timestamp}"
+        )
         hasher.update(segment.encode("utf-8"))
 
     return hasher.hexdigest()

@@ -95,6 +95,10 @@ class TurnEvent(BaseModel):
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     timestamp: str = Field(..., description="ISO 8601 UTC timestamp")
     verified: bool = Field(default=False, description="True if word_count >= 10 and confidence >= 0.5")
+    turn_type: str = Field(default="answer", description="'answer' | 'clarification' | 'intro' | 'greeting'")
+    code_snippet: Optional[str] = Field(default=None, description="Candidate code or architecture scratchpad content")
+    wpm: Optional[float] = Field(default=None, description="Estimated words per minute speech rate")
+    filler_count: Optional[int] = Field(default=None, description="Detected verbal filler word count (um, uh, like)")
 
 
 # ── Persona Models ────────────────────────────────────────────────────────────

@@ -1,4 +1,3 @@
-
 """
 services/chat_service.py
 
@@ -8,6 +7,8 @@ Coordinates:
   - Personalized Persona opening greetings
   - Sequential progression through Calibrated Blueprint Questions (1 through 6)
   - Candidate introduction handling
+  - Socratic Clarification & Constraint Hints (without burning turns or advancing question index)
+  - Candidate Code/Architecture Scratchpad evaluation
   - Socratic follow-ups and persona-specific behavioral steering
   - Real-time persistence to the Append-Only SQLite Turn Ledger
   - Natural interview conclusion
@@ -146,6 +147,7 @@ async def start_interview_session(
             text=greeting_text,
             question_index=0,
             confidence=1.0,
+            turn_type="greeting",
         )
         ledger_service.upsert_session(
             session_id=session_id,
@@ -175,24 +177,33 @@ async def process_turn(
     session_id: str,
     candidate_text: str,
     persona_id: str = "alex",
+    turn_type: str = "answer",
+    code_snippet: Optional[str] = None,
+    wpm: Optional[float] = None,
+    filler_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Processes a candidate turn:
     1. Records candidate speech in SQLite Turn Ledger.
-    2. Determines conversation stage (Introduction vs Blueprint Questions 1-6 vs Wrap-up).
-    3. Prompts the selected AI Persona via Groq with conversation context.
-    4. Records the interviewer response in SQLite Turn Ledger.
-    5. Returns the response with updated question state.
+    2. Determines conversation stage (Introduction vs Blueprint Questions 1-6 vs Wrap-up vs Clarification).
+    3. Handles Socratic Clarification & Constraint Hints WITHOUT burning turns or advancing question index.
+    4. Evaluates Candidate Code/Architecture Scratchpad alongside spoken audio.
+    5. Prompts the selected AI Persona via Groq with conversation context.
+    6. Records the interviewer response in SQLite Turn Ledger.
+    7. Returns the response with updated question state.
     """
     clean_text = _clean_speech_text(candidate_text)
-    if not clean_text:
-        return {
-            "session_id": session_id,
-            "interviewer_text": "Take your time. Whenever you're ready, walk me through your thoughts.",
-            "stage": "listening",
-            "question_index": 0,
-            "is_finished": False,
-        }
+    if not clean_text and not (code_snippet and code_snippet.strip()):
+        if turn_type == "clarification":
+            clean_text = "Could you give me a hint or clarify the constraints for this question?"
+        else:
+            return {
+                "session_id": session_id,
+                "interviewer_text": "Take your time. Whenever you're ready, walk me through your thoughts.",
+                "stage": "listening",
+                "question_index": 0,
+                "is_finished": False,
+            }
 
     persona = get_persona(persona_id)
     bp = get_blueprint(session_id) or build_fallback_blueprint("Technology Firm", "Software Engineer")
@@ -201,16 +212,96 @@ async def process_turn(
 
     # Retrieve existing turns BEFORE recording candidate turn to check stage
     prior_turns = ledger_service.get_session_turns(session_id)
-    candidate_turns_count = sum(1 for t in prior_turns if t.speaker == TurnSpeaker.CANDIDATE)
+    candidate_answers_count = sum(1 for t in prior_turns if t.speaker == TurnSpeaker.CANDIDATE and t.turn_type == "answer")
+    answering_q_idx = candidate_answers_count
 
-    # Determine which question this candidate turn is answering
-    # If candidate_turns_count == 0, this turn is the Candidate's Introduction!
-    # If candidate_turns_count == 1, answering Question 1 (idx 0), and so on.
-    answering_q_idx = candidate_turns_count
+    clean_level = bp.seniority.value if hasattr(bp.seniority, "value") else str(bp.seniority)
+    system_prompt = compile_persona_instructions(persona, bp, bp.role, clean_level)
 
-    # Guard against trivial fillers or hallucinations burning technical question turns
+    # ─── CASE A: Socratic Clarification / Constraint Hint ────────────────────────
+    if turn_type == "clarification":
+        active_q_idx = max(0, answering_q_idx - 1) if answering_q_idx > 0 else 0
+        active_q = questions[active_q_idx] if (questions and active_q_idx < total_q_count) else None
+        active_q_num = active_q_idx + 1
+        active_q_text = active_q.text if active_q else "the current problem requirements"
+
+        logger.info("[chat_service] Clarification requested on Q%d for session %s", active_q_num, session_id)
+
+        # Record candidate clarification turn
+        ledger_service.record_turn(
+            session_id=session_id,
+            speaker=TurnSpeaker.CANDIDATE,
+            text=clean_text or "Could you clarify the constraints or give a hint?",
+            question_index=active_q_num,
+            role="clarification",
+            confidence=1.0,
+            turn_type="clarification",
+            code_snippet=code_snippet,
+            wpm=wpm,
+            filler_count=filler_count,
+        )
+
+        # Prompt LLM for Socratic Hint
+        clarification_messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        recent_turns = prior_turns[-6:] if len(prior_turns) > 6 else prior_turns
+        for t in recent_turns:
+            role = "assistant" if t.speaker == TurnSpeaker.INTERVIEWER else "user"
+            clarification_messages.append({"role": role, "content": t.text})
+
+        if code_snippet and code_snippet.strip():
+            clarification_messages.append({
+                "role": "system",
+                "content": f"[Candidate Code Scratchpad]:\n```{code_snippet.strip()}```\nCandidate is asking about their written code or architecture."
+            })
+
+        clarification_messages.append({
+            "role": "system",
+            "content": (
+                f"The candidate is asking for clarification or a constraint hint on Question {active_q_num}: \"{active_q_text}\". "
+                f"Candidate's question: \"{clean_text}\". "
+                f"As {persona.name}, provide a helpful, Socratic hint or clarify problem constraints "
+                f"WITHOUT revealing the complete algorithmic solution or writing the code for them. Keep it strictly under 35 words. "
+                f"Conclude by asking them how they'd approach Question {active_q_num}."
+            )
+        })
+
+        try:
+            res = await _groq_client.chat.completions.create(
+                model=_DEFAULT_MODEL,
+                messages=clarification_messages,
+                max_tokens=140,
+                temperature=0.3,
+            )
+            interviewer_reply = res.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error("[chat_service] Groq clarification error: %s", e)
+            interviewer_reply = "Think about the data scale and edge cases like duplicates or concurrent writes. How does that guide your design?"
+
+        # Record interviewer hint turn without incrementing question index
+        ledger_service.record_turn(
+            session_id=session_id,
+            speaker=TurnSpeaker.INTERVIEWER,
+            text=interviewer_reply,
+            question_index=active_q_num,
+            role="interviewer_hint",
+            confidence=1.0,
+            turn_type="clarification",
+        )
+
+        return {
+            "session_id": session_id,
+            "interviewer_text": interviewer_reply,
+            "stage": "clarification",
+            "question_index": answering_q_idx,
+            "total_questions": total_q_count,
+            "current_question_text": active_q_text,
+            "is_finished": False,
+        }
+
+    # ─── CASE B: Standard Technical Answer Turn ──────────────────────────────────
+    # Guard against trivial fillers burning technical question turns
     norm_text = re.sub(r"[^\w\s]", "", clean_text.lower()).strip()
-    if norm_text in _TRIVIAL_FILLERS and answering_q_idx > 0:
+    if norm_text in _TRIVIAL_FILLERS and answering_q_idx > 0 and not (code_snippet and code_snippet.strip()):
         current_q = questions[answering_q_idx - 1] if (answering_q_idx - 1 < total_q_count) else None
         logger.info("[chat_service] Candidate sent filler phrase '%s' on Q%d; holding question without advance", clean_text, answering_q_idx)
         return {
@@ -229,33 +320,34 @@ async def process_turn(
         text=clean_text,
         question_index=answering_q_idx,
         confidence=1.0,
+        turn_type="answer",
+        code_snippet=code_snippet,
+        wpm=wpm,
+        filler_count=filler_count,
     )
 
-    # Determine what question the interviewer should deliver NEXT
-    # If answering_q_idx == 0: candidate just introduced themselves -> next is Question 1 (questions[0])
-    # If answering_q_idx == 1: candidate answered Q1 -> next is Question 2 (questions[1])
-    # ...
-    # If answering_q_idx >= total_q_count: all questions completed -> conclude!
     is_intro_turn = (answering_q_idx == 0)
     is_final_turn = (answering_q_idx >= total_q_count)
     next_q_idx = min(total_q_count, answering_q_idx + 1) if not is_intro_turn else 1
 
-    just_answered_q = questions[answering_q_idx - 1] if (answering_q_idx > 0 and answering_q_idx - 1 < total_q_count) else None
     next_to_deliver_q = questions[answering_q_idx] if answering_q_idx < total_q_count else None
     next_q_num = answering_q_idx + 1
-
-    clean_level = bp.seniority.value if hasattr(bp.seniority, "value") else str(bp.seniority)
-    system_prompt = compile_persona_instructions(persona, bp, bp.role, clean_level)
 
     # Build messages history for LLM
     all_turns = ledger_service.get_session_turns(session_id)
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
 
-    # Append recent conversation history (up to last 10 turns)
     recent_turns = all_turns[-10:] if len(all_turns) > 10 else all_turns
     for t in recent_turns:
         role = "assistant" if t.speaker == TurnSpeaker.INTERVIEWER else "user"
         messages.append({"role": role, "content": t.text})
+
+    # Inject candidate code snippet if present
+    if code_snippet and code_snippet.strip():
+        messages.append({
+            "role": "system",
+            "content": f"[Candidate Code / Scratchpad]:\n```{code_snippet.strip()}```\nCandidate submitted this code snippet alongside their spoken explanation. Directly evaluate their code implementation, syntax, or architecture diagram in your reaction."
+        })
 
     # Add specific guidance depending on stage
     if is_intro_turn:
@@ -331,6 +423,7 @@ async def process_turn(
         text=interviewer_reply,
         question_index=answering_q_idx if is_intro_turn else next_q_idx,
         confidence=1.0,
+        turn_type="answer",
     )
 
     stage = "concluded" if is_final_turn else ("intro_ack" if is_intro_turn else "question")

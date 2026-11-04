@@ -138,6 +138,10 @@ class RecordTurnRequest(BaseModel):
     text: str
     question_index: int = 0
     confidence: float = 1.0
+    turn_type: str = "answer"
+    code_snippet: Optional[str] = None
+    wpm: Optional[float] = None
+    filler_count: Optional[int] = None
 
 
 class StartChatRequest(BaseModel):
@@ -153,6 +157,10 @@ class ChatTurnRequest(BaseModel):
     session_id: str
     candidate_text: str = ""
     persona_id: Optional[str] = "alex"
+    turn_type: str = "answer"  # "answer" | "clarification"
+    code_snippet: Optional[str] = None
+    wpm: Optional[float] = None
+    filler_count: Optional[int] = None
 
 
 # ─── System Health & Status Endpoints ─────────────────────────────────────────
@@ -488,6 +496,10 @@ async def interview_chat_endpoint(req: ChatTurnRequest):
             session_id=req.session_id,
             candidate_text=candidate_text,
             persona_id=req.persona_id or "alex",
+            turn_type=req.turn_type,
+            code_snippet=req.code_snippet,
+            wpm=req.wpm,
+            filler_count=req.filler_count,
         )
         return res
     except Exception as e:
@@ -632,6 +644,10 @@ async def record_turn_endpoint(req: RecordTurnRequest):
         text=req.text,
         question_index=req.question_index,
         confidence=req.confidence,
+        turn_type=req.turn_type,
+        code_snippet=req.code_snippet,
+        wpm=req.wpm,
+        filler_count=req.filler_count,
     )
     return turn
 
