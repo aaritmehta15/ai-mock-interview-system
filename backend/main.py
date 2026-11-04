@@ -18,7 +18,7 @@ import sys
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -47,6 +47,7 @@ from backend.services.blueprint_service import (
 from backend.services.evaluation_service import evaluation_service
 from backend.services.ledger_service import ledger_service
 from backend.services import chat_service
+from backend.services import tts_service
 from livekit import api as livekit_api
 from groq import AsyncGroq
 
@@ -384,6 +385,45 @@ async def generate_token_endpoint(req: TokenRequest):
 
 
 # ─── Interactive Voice & Conversational Chat Endpoints ────────────────────────
+
+@app.get(
+    "/api/tts",
+    summary="Synthesize spoken neural audio stream via Edge Neural TTS",
+    tags=["Voice Studio"],
+)
+async def tts_endpoint(
+    text: str,
+    persona_id: str = "alex",
+):
+    """
+    Synthesizes natural, low-latency 24kHz MP3 audio stream for browser Web Audio API.
+    Features:
+      - Automatic spoken text normalization (O(N) -> 'O of N', markdown removal).
+      - In-memory RAM LRU caching for instant 0ms responses on repeated prompts.
+      - Calibrated Edge Neural voices (Priya: NeerjaNeural, Alex: GuyNeural, Marcus: RyanNeural).
+    """
+    clean_text = (text or "").strip()
+    if not clean_text:
+        return Response(content=b"", media_type="audio/mpeg")
+
+    try:
+        audio_bytes = await tts_service.synthesize_speech(clean_text, persona_id=persona_id)
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Content-Disposition": "inline; filename=\"speech.mp3\"",
+                "X-Audio-Bytes": str(len(audio_bytes)),
+            },
+        )
+    except Exception as e:
+        logger.error("[api] TTS synthesis failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Speech synthesis failed: {str(e)}",
+        )
+
 
 @app.post(
     "/api/interview/start",

@@ -25,6 +25,7 @@ livekit-plugins-google>=1.8.2
 livekit-plugins-deepgram>=1.8.2
 livekit-plugins-silero>=1.8.2
 livekit-plugins-openai>=1.8.2
+edge-tts>=6.1.19
 
 # ── Resume Parsing & AI Synthesis ─────────────────────────────────────────────
 pypdf>=5.0.0
