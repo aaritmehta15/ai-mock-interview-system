@@ -146,6 +146,13 @@ class CompetencyScore(BaseModel):
     tradeoff_intuition_score: float = Field(default=0.0, ge=0.0, le=100.0)
 
 
+class CommunicationTelemetry(BaseModel):
+    average_wpm: float = Field(default=0.0, description="Average spoken words per minute across turns")
+    total_fillers: int = Field(default=0, description="Total verbal filler word occurrences (um, uh, like)")
+    wpm_rating: str = Field(default="Optimal Executive Cadence (120-160 WPM)", description="Pacing evaluation")
+    filler_density: float = Field(default=0.0, description="Fillers per 100 spoken words")
+
+
 class EvaluationReport(BaseModel):
     """
     Staff Hiring Committee Executive Dossier.
@@ -160,3 +167,5 @@ class EvaluationReport(BaseModel):
     unreached_question_count: int = Field(default=0)
     verified_turn_count: int = Field(default=0)
     created_at: str
+    executive_spoken_debrief: Optional[str] = Field(default=None, description="Concise 3-sentence spoken debrief written for audio playback")
+    communication_telemetry: Optional[CommunicationTelemetry] = Field(default=None, description="Detailed speech pacing and verbal filler metrics")
