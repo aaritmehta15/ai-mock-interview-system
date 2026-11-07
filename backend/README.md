@@ -8,12 +8,12 @@ The backend of **Apex Interview AI** is an asynchronous Python service architect
 ## 🏗️ Architecture Overview
 
 The backend is composed of two decoupled runtime processes:
-1. **FastAPI Web Service (`main.py` / `run_server.py`)**:
-   - Handles intake, PDF resume parsing, blueprint synthesis, WebRTC JWT token generation, session ledger auditing, and post-interview evaluation dossiers.
+1. **FastAPI Web & Voice Service (`main.py` / `run_server.py`)**:
+   - Handles intake, PDF resume parsing, blueprint synthesis, hybrid voice turn-taking (`/api/interview/start`, `/api/interview/chat`), Edge Neural TTS streaming (`/api/tts`), session ledger auditing, and post-interview evaluation dossiers.
    - Operates at **~95 MB RAM** (well within Render's 512 MB ceiling), completely immune to OOM crashes (`SIGKILL 137`).
 2. **LiveKit Voice Agent Worker (`agent.py`)**:
-   - Connects outbound via WebSockets to LiveKit Cloud.
-   - Manages real-time WebRTC audio streams, Silero Voice Activity Detection (VAD), proactive interviewer greetings, and live turn logging into the SQLite ledger.
+   - Decoupled enterprise sidecar worker connecting outbound via WebSockets to LiveKit Cloud.
+   - Manages WebRTC audio streams, Silero Voice Activity Detection (VAD), proactive interviewer greetings, and enterprise telephony bridging.
 
 ---
 
@@ -29,15 +29,17 @@ backend/
 ├── services/
 │   ├── blueprint_service.py     # PDF parsing, enterprise track synthesis & multi-LLM fallback
 │   ├── ledger_service.py        # Append-only SQLite Turn Ledger & SHA-256 session integrity
-│   └── evaluation_service.py    # Anti-phantom binary assertion evaluation & dossier generation
+│   ├── tts_service.py           # Microsoft Edge Neural TTS (24kHz MP3, RAM cache, normalizer)
+│   └── evaluation_service.py    # Multimodal code + speech evaluation & executive debrief
 │
 ├── models/
 │   └── schemas.py               # Pydantic v2 domain models, enums, and API contracts
 │
 ├── tests/
-│   └── test_services_engine.py  # 29 Comprehensive unit, ledger, API, and anti-phantom tests
+│   ├── test_services_engine.py  # Unit, ledger, blueprint, and anti-phantom tests
+│   └── test_api_endpoints.py    # E2E API tests (chat, tts, ledger, and evaluation)
 │
-├── agent.py                     # LiveKit Agents WebRTC worker with Silero VAD
+├── agent.py                     # LiveKit Agents WebRTC enterprise voice worker with Silero VAD
 ├── main.py                      # FastAPI application, route handlers, and middleware
 ├── run_server.py                # Isolated web service runner for cloud deployments
 ├── config.py                    # Environment variable loader and type-safe settings
@@ -50,11 +52,18 @@ backend/
 
 ### 1. SQLite Turn Ledger (`services/ledger_service.py`)
 To prevent hallucinated evaluation reports, all conversation turns are logged to an append-only SQLite database (`ledger.db`):
-- **Verification Rule**: Turns are marked as `verified = 1` if `word_count >= 10` and `confidence >= 0.5`.
+- **Extended Turn Schema**:
+  - `turn_id` (TEXT PRIMARY KEY), `session_id` (TEXT NOT NULL), `speaker` ('candidate' | 'interviewer')
+  - `question_index` (INTEGER), `text` (TEXT NOT NULL), `word_count` (INTEGER), `confidence` (REAL)
+  - `timestamp` (TEXT ISO 8601 UTC), `verified` (INTEGER: 1 if word_count >= 10 and confidence >= 0.5)
+  - `turn_type` (TEXT: 'answer' | 'clarification' | 'greeting')
+  - `code_snippet` (TEXT: synchronized live code editor snapshot)
+  - `wpm` (REAL: words per minute speech cadence)
+  - `filler_count` (INTEGER: count of verbal filler tokens)
 - **Cryptographic Audit Digest**:
   ```python
   def compute_session_hash(session_id: str) -> str:
-      """Generates an immutable SHA-256 hash across all chronological turns."""
+      """Generates an immutable SHA-256 hash across all chronological turns, turn types, and code snippets."""
   ```
 - **Active Blueprint Association**: Persists candidate target company, role, seniority, and selected persona across backend restarts.
 
@@ -72,22 +81,32 @@ Generates structured, calibrated interview blueprints containing questions, comp
   3. `qwen/qwen3.8-27b` (High-speed tertiary model)
   4. Local Deterministic Fallback (Guarantees zero-failure operation even during upstream API outages)
 
-### 3. Anti-Phantom Evaluation Service (`services/evaluation_service.py`)
+### 3. Microsoft Edge Neural TTS Service (`services/tts_service.py`)
+Provides real-time 24kHz neural audio synthesis with zero third-party cloud costs:
+- **Spoken Text Normalizer (`normalize_text_for_voice`)**: Pre-processes raw technical text for human listening before feeding into the neural synthesizer:
+  - Asymptotic complexity: $O(1) \to$ "O of 1", $O(\log N) \to$ "O of log N", $O(N^2) \to$ "O of N squared"
+  - Technical acronyms: `SQL` $\to$ "S-Q-L", `API` $\to$ "A-P-I", `QPS` $\to$ "Q-P-S"
+  - Units & numbers: `200ms` $\to$ "200 milliseconds", `10gb` $\to$ "10 gigabytes", `100k` $\to$ "100 thousand"
+  - Markdown stripping: Strips code fences, asterisks, URLs, and bullet points.
+- **RAM LRU Cache**: Caches common spoken phrases in memory, yielding `0ms` generation latency.
+- **Voice Catalog**:
+  - `en-IN-NeerjaNeural` (Indian English Female - Default)
+  - `en-US-GuyNeural` (US English Male)
+  - `en-GB-RyanNeural` (British English Male)
+
+### 4. Multimodal Anti-Phantom Evaluation Service (`services/evaluation_service.py`)
 The evaluation service queries the **SQLite Turn Ledger first**:
 1. It retrieves all verified turns spoken by both the candidate and interviewer.
 2. If a blueprint question was never asked aloud by the interviewer, it is flagged as:
    `status = "UNREACHED", score = 0.0, weight = 0.0`
    and mathematically excluded from penalizing the candidate.
-3. For every asked question, the candidate's verified turns are evaluated against each **Binary Assertion**.
-4. Extracts **verbatim quotes** from the transcript as cryptographic evidence for the final scorecard.
-5. Computes calibrated scores across 4 competencies:
-   - Data Structures & Algorithms (DSA)
-   - System Design & Scalability
-   - Communication Clarity & Scaffolding
-   - Architectural Trade-off Intuition
-6. Emits a definitive Hiring Committee recommendation: `STRONG HIRE`, `HIRE`, `BORDERLINE`, or `NO HIRE`.
+3. **Multimodal Assertion Scoring**: For every asked question, evaluates candidate spoken turns alongside synchronized code scratchpad snapshots against each **Binary Assertion**.
+4. **Speech Cadence & Verbal Filler Analysis**: Aggregates WPM and filler word density (`um`, `uh`, `like`, etc.) into the *Communication Clarity* competency score.
+5. **Executive Spoken Debrief**: Synthesizes a 3-sentence spoken summary covering top strength, core architectural gap, and hiring verdict.
+6. Extracts **verbatim quotes** from the transcript as cryptographic evidence for the final scorecard.
+7. Emits a definitive Hiring Committee recommendation: `STRONG HIRE`, `HIRE`, `BORDERLINE`, or `NO HIRE`.
 
-### 4. Calibrated Personas (`orchestrator/personas.py`)
+### 5. Calibrated Personas (`orchestrator/personas.py`)
 Defines the distinct psychometric profiles:
 - **Alex Rivera** (`alex`): Engineering Lead · Moderate Rigor · 4.5s Pause Tolerance · 0.5s Thinking Delay · Scaffolding Hints.
 - **Marcus Vance** (`marcus`): Principal Staff Architect · High Rigor · 2.5s Pause Tolerance · 2.0s Thinking Delay (Note-Taking) · Edge-Case Grilling.
@@ -109,26 +128,31 @@ Defines the distinct psychometric profiles:
 - `POST /api/blueprint/upload` — Accepts `multipart/form-data` with candidate PDF resume.
 - `GET /api/blueprint/{session_id}` — Retrieves active blueprint for a given session.
 
-### WebRTC Token Dispenser
+### Hybrid Voice & Neural Audio Engine
+- `POST /api/interview/start` — Initializes a hybrid voice session, selects persona, generates opening greeting, and synthesizes 24kHz audio greeting.
+- `POST /api/interview/chat` — Conversational turn endpoint handling speech answers, Socratic clarifications, live scratchpad code syncing, rolling WPM/filler tracking, and neural audio URL response.
+- `GET /api/tts` — Real-time streaming 24kHz Edge Neural MP3 endpoint with technical text normalizer and RAM LRU caching (`?text=...&voice=...`).
+
+### WebRTC Token Dispenser (Enterprise Sidecar)
 - `POST /api/token` — Generates a signed LiveKit WebRTC access token (JWT) with video/audio grants and participant metadata.
 
 ### Ledger & Audit
-- `POST /api/ledger/turn` — Appends a single turn event to the SQLite database.
+- `POST /api/ledger/turn` — Appends a single turn event to the SQLite database with `turn_type`, `code_snippet`, `wpm`, and `filler_count`.
 - `GET /api/ledger/{session_id}` — Returns all chronological turns, asked question indices, and the SHA-256 session integrity hash.
 
 ### Evaluation
-- `POST /api/evaluate/{session_id}` — Triggers anti-phantom evaluation and generates the Staff Hiring Committee Evidence Dossier.
+- `POST /api/evaluate/{session_id}` — Triggers multimodal assertion evaluation, computes WPM & filler density metrics, synthesizes 3-sentence Executive Spoken Debrief, and generates the Staff Hiring Committee Evidence Dossier.
 
 ### History & Archive
 - `GET /api/history` — Lists historical sessions with overall scores and recommendations.
-- `GET /api/history/{session_id}` — Retrieves detailed session dossier with blueprint and turns.
+- `GET /api/history/{session_id}` — Retrieves detailed session dossier with blueprint, turns, and evaluation report.
 - `DELETE /api/history/{session_id}` — Deletes session and associated ledger turns.
 
 ---
 
 ## 🧪 Automated Test Suite
 
-Apex Interview AI maintains a rigorous test suite (`backend/tests/test_services_engine.py`):
+Apex Interview AI maintains a rigorous test suite (`backend/tests/test_services_engine.py` and `backend/tests/test_api_endpoints.py`):
 
 ```bash
 # Activate your virtual environment
@@ -138,11 +162,13 @@ source venv/bin/activate    # or venv\Scripts\activate on Windows
 python -m unittest discover backend/tests -v
 ```
 
-### Coverage Highlights:
-- **Ledger Verification**: Tests turn insertion, verified turn filtering, session upsert, and SHA-256 hash consistency.
+### Coverage Highlights (31 Tests):
+- **TTS Synthesis & Normalizer**: Tests Edge Neural 24kHz MP3 generation, Big-O complexity transformation ($O(\log N) \to$ "O of log N"), acronym expansion, markdown stripping, and RAM cache hits.
+- **Hybrid Voice Flow**: Tests `/api/interview/start` greeting generation, `/api/interview/chat` conversational turns, Socratic clarification state machine invariants ($q_{\text{next}} = q$), and live code scratchpad persistence.
+- **Multimodal Evaluation**: Tests speech + code scratchpad assertion checking, WPM and verbal filler density calculation, and executive spoken debrief generation.
+- **Ledger Verification**: Tests turn insertion, verified turn filtering, session upsert, schema migration, and SHA-256 hash consistency.
 - **Blueprint Synthesis**: Tests resume PDF text extraction, structured JSON generation, company-specific tracks, and multi-model fallback resilience.
-- **Anti-Phantom Evaluation**: Tests that unreached questions receive weight $0.0$ and do not penalize the overall score.
-- **End-to-End API Flow**: Tests blueprint generation $\to$ token issuance $\to$ turn recording $\to$ ledger auditing $\to$ evaluation synthesis.
+- **Anti-Phantom Guarantee**: Tests that unreached questions receive weight $0.0$ and do not penalize candidate overall score.
 
 ---
 

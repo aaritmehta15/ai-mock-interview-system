@@ -2,15 +2,17 @@
 ### *The First Evidence-Grounded, Low-Latency Real-Time Voice Technical Interviewer & Staff Hiring Committee Dossier*
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![LiveKit](https://img.shields.io/badge/LiveKit-WebRTC%20Agents-002B36?style=flat-square&logo=webrtc&logoColor=white)](https://livekit.io)
+[![Edge%20Neural%20TTS](https://img.shields.io/badge/Edge%20Neural%20TTS-24kHz%20Audio-0078D4?style=flat-square&logo=microsoft&logoColor=white)](https://github.com/rany2/edge-tts)
+[![Web%20Speech%20API](https://img.shields.io/badge/Web%20Speech%20API-Chrome%20en--IN-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API)
+[![LiveKit](https://img.shields.io/badge/LiveKit-WebRTC%20Sidecar-002B36?style=flat-square&logo=webrtc&logoColor=white)](https://livekit.io)
 [![React](https://img.shields.io/badge/React-18.3+-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Vite](https://img.shields.io/badge/Vite-6.0+-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev)
-[![Tests](https://img.shields.io/badge/Tests-29%2F29%20Passing-success?style=flat-square&logo=pytest&logoColor=white)](#-testing--verification)
+[![Tests](https://img.shields.io/badge/Tests-31%2F31%20Passing-success?style=flat-square&logo=pytest&logoColor=white)](#-testing--verification)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 > **Live Production Demo**: [https://ai-mock-interview-system-liart.vercel.app](https://ai-mock-interview-system-liart.vercel.app)  
-> **Backend API**: [https://ai-mock-interview-system.onrender.com/docs](https://ai-mock-interview-system.onrender.com/docs)  
+> **Backend API**: [https://ai-mock-interview-backend-v832.onrender.com/docs](https://ai-mock-interview-backend-v832.onrender.com/docs)  
 > *Recruiters & Hirers: Click **"Explore Live Demo as Guest"** for instant 0-friction access (no signup required).*
 
 ---
@@ -24,10 +26,12 @@ Most AI interview tools on the market are glorified chatbots with text-to-speech
 4. **Subjective Score Drift**: Uncalibrated prompts ask models to "grade holistic fluency on a 1-100 scale", producing $\pm 25$ score variations on identical transcripts.
 
 ### How Apex Interview AI Solves This:
-- **Append-Only SQLite Turn Ledger**: Every utterance is logged chronologically with word count, confidence, and timestamp. The evaluator strictly queries the ledger — unreached questions are mathematically flagged as `UNREACHED` (weight $0.0$) and cannot penalize the candidate.
-- **Sub-650ms Full-Duplex WebRTC Voice Engine**: Built on LiveKit Agents, Silero VAD ($200\text{ms}$ trailing boundary), and high-throughput streaming LLMs (Groq / Gemini) with native barge-in interruption.
+- **Append-Only SQLite Turn Ledger**: Every utterance is logged chronologically with word count, speech confidence, turn type, synchronized code snippet, cadence (WPM), and verbal filler count. The evaluator strictly queries the ledger — unreached questions are mathematically flagged as `UNREACHED` (weight $0.0$) and cannot penalize the candidate.
+- **Sub-775ms Hybrid Voice Architecture**: Built on browser-cloud Chrome Web Speech API (`webkitSpeechRecognition`, `lang='en-IN'`, continuous + interim) paired with high-fidelity Microsoft Edge Neural TTS (24kHz MP3 with technical text normalizer and RAM LRU caching) and Web Audio API playback with instant spacebar barge-in. Eliminates server-side ASR hops, carrier latency, and inaudible audio drops.
+- **Socratic Clarification & Constraint Scaffolding**: Candidates can ask questions or seek hints (`turn_type="clarification"`); the interviewer provides targeted architectural constraints without incrementing the question index or advancing the state machine prematurely.
+- **Synchronized Multimodal Code Scratchpad**: Real-time code editor synced with spoken answers, allowing candidates to explain and type algorithms simultaneously while the evaluator grades code and speech against binary assertions.
 - **Calibrated Psychological Personas**: 3 distinct interviewer archetypes with dynamic pause tolerance, deliberate note-taking silences, and adaptive escalation probes that cross-examine high-level claims.
-- **Evidence-Grounded Dossier**: Grades candidate answers against pre-generated **Binary Assertions** (pass/fail factual rubrics) backed by **verbatim transcript citations** across 4 core engineering competencies.
+- **Evidence-Grounded Dossier & Executive Spoken Debrief**: Grades candidate answers against pre-generated **Binary Assertions** backed by **verbatim transcript citations**, speech cadence telemetry (WPM & verbal filler density), and an Edge Neural **Executive Spoken Debrief** audio player.
 
 ---
 
@@ -36,19 +40,24 @@ Most AI interview tools on the market are glorified chatbots with text-to-speech
 ```
                                   [ CANDIDATE BROWSER ]
                                React 18 + Vite + TypeScript
-                                             │
-                       ┌─────────────────────┴─────────────────────┐
-                       │ REST / HTTP (JSON / Multipart)            │ Full-Duplex WebRTC Audio
-                       ▼                                           ▼
-             [ FastAPI Backend ]                         [ LiveKit Cloud Edge ]
-           (Render · Sub-100MB RAM)                         (wss://...livekit.cloud)
-                       │                                           ▲
-        ┌──────────────┼──────────────┐                            │ Real-Time Audio
-        ▼              ▼              ▼                            ▼
- [Blueprint Service] [Turn Ledger] [Evaluation]       [ LiveKit Voice Agent Worker ]
- - PDF Resume Parser - SQLite DB   - Anti-Phantom     - Silero VAD (200ms boundary)
- - Track Tailoring   - SHA-256     - 4 Competencies   - Persona State Machine
- - Multi-LLM Fallback- Audit Hash  - Verbatim Quotes  - Groq / Gemini Streaming LLM
+             ┌──────────────────────────────┼──────────────────────────────┐
+             │ Chrome Web Speech STT        │ REST / HTTP (JSON / Audio)   │ WebRTC Audio Sidecar
+             │ (en-IN, continuous, interim) │ (FastAPI on Render)          │ (Optional Telephony)
+             ▼                              ▼                              ▼
+  [ Web Audio API Player ]       [ FastAPI Backend Engine ]      [ LiveKit Cloud Edge ]
+  - Instant Spacebar Barge-in    - Persona State Machine         - wss://...livekit.cloud
+  - 24kHz MP3 AudioBuffer        - Groq / Gemini Multi-LLM                 │
+  - Rolling WPM / Filler HUD     - Technical Voice Normalizer              ▼
+  - Turn Audio Replay            - Edge Neural TTS Service       [ LiveKit Voice Worker ]
+             ▲                              │                    - Silero VAD (200ms)
+             └────── [24kHz MP3 Stream] ────┤                    - agent.py (Headless)
+                                            ▼
+                           ┌────────────────┴────────────────┐
+                           ▼                                 ▼
+                  [Turn Ledger Service]            [Evaluation Service]
+                  - SQLite WAL Engine              - Anti-Phantom Assertion Scorer
+                  - SHA-256 Audit Digest           - Multimodal Code + Speech Grader
+                  - turn_type, code, wpm, fillers  - Executive Spoken Audio Debrief
 ```
 
 ---
@@ -67,20 +76,22 @@ CREATE TABLE turns (
     word_count INTEGER,
     confidence REAL,
     timestamp TEXT NOT NULL,
-    verified INTEGER NOT NULL      -- 1 if word_count >= 10 and confidence >= 0.5
+    verified INTEGER NOT NULL,     -- 1 if word_count >= 10 and confidence >= 0.5
+    turn_type TEXT DEFAULT 'answer', -- 'answer' | 'clarification' | 'greeting'
+    code_snippet TEXT,             -- live scratchpad code at time of speech
+    wpm REAL,                      -- words per minute speech cadence
+    filler_count INTEGER DEFAULT 0 -- verbal filler count ('um', 'uh', etc.)
 );
 ```
-- **Session Integrity Digest**: Computes a cryptographic `SHA-256` hash over all chronological turns, guaranteeing an immutable audit trail.
+- **Session Integrity Digest**: Computes an immutable cryptographic `SHA-256` hash across all chronological turns, turn types, and code snippets, guaranteeing an untampered audit trail.
 - **Zero Hallucination Grading**: If an interview ends early, only the questions that actually appeared in the interviewer's speech are graded. All unreached blueprint questions are classified as `UNREACHED` with $0.0$ weight.
 
-### 2. ⚡ Sub-650ms Real-Time Voice Streaming
-- **LiveKit Agents + Silero VAD**: Low-latency voice activity detection with $200\text{ms}$ trailing speech boundary.
-- **Barge-In / Natural Interruption**: The candidate can interrupt the interviewer mid-sentence to clarify requirements, exactly like in a real technical interview.
-- **Live Latency Telemetry Pill**: The frontend exposes real-time WebRTC metrics:
-  - **TTFT** (Time-to-First-Token): $<650\text{ms}$
-  - **VAD Latency**: $200\text{ms}$
-  - **Bitrate**: $32\text{ kbps}$ Opus stream with $0\%$ packet loss
-  - **Ledger Hash**: Truncated SHA-256 audit digest
+### 2. ⚡ Sub-775ms Hybrid Voice Engine & Enterprise WebRTC Sidecar
+- **Chrome Web Speech STT**: In-browser streaming cloud speech recognition (`webkitSpeechRecognition`, `lang='en-IN'`, `continuous=true`, `interimResults=true`) with 200ms keep-alive on `onend`. Zero server-side ASR hops, carrier latency, or inaudible drops.
+- **Microsoft Edge Neural TTS**: High-fidelity 24kHz MP3 audio streamed from `backend/services/tts_service.py` (`en-IN-NeerjaNeural`, `en-US-GuyNeural`, `en-GB-RyanNeural`) with server-side RAM LRU caching.
+- **Spoken Text Normalizer**: Pre-processes raw technical text before TTS: $O(1) \to$ "O of 1", $O(\log N) \to$ "O of log N", `SQL` $\to$ "S-Q-L", `200ms` $\to$ "200 milliseconds", stripping code fences and markdown.
+- **Instant Spacebar Barge-In**: Tapping Space or the Interrupt button immediately terminates Web Audio API playback nodes (`AudioBufferSourceNode.stop()`), resets the audio queue, and re-enables the microphone after an acoustic settle gap.
+- **Enterprise WebRTC Sidecar**: Dedicated LiveKit worker (`agent.py`) retained for headless enterprise telephony and carrier-grade media streaming.
 
 ### 3. 🧠 3 Calibrated Interviewer Personas
 Each interviewer possesses custom behavioral parameters, pause tolerances, and psychological styles:
@@ -110,6 +121,13 @@ Delivers a comprehensive post-interview evaluation report:
   - *Architectural Trade-Off Intuition*
 - **Verbatim Evidence Citations**: Exact candidate quotes mapped to each binary assertion requirement.
 
+### 6. 🛠️ The 5 Advanced Voice Studio & Evaluation Innovations
+1. **Live Speech Cadence & Verbal Filler Telemetry HUD**: Monitors speaking pace in real-time ($WPM = \frac{\Delta \text{words}}{\Delta t}$) alongside an active verbal filler detector (`um`, `uh`, `like`, `you know`, `actually`, `basically`, `sort of`), computing verbal filler density ($\frac{\text{fillers}}{\text{words}} \times 100\%$) directly during the interview.
+2. **Socratic Clarification & Constraint Hint Flow**: Toggling Socratic mode (`turn_type="clarification"`) instructs the interviewer persona to deliver architectural constraints and scaffolding hints without incrementing candidate answer counts or advancing the blueprint question index ($q_{\text{next}} = q$).
+3. **Synchronized Multimodal Code Scratchpad**: A collapsible in-studio code editor that snapshots active code at the instant speech turns occur. The evaluation engine scores speech and code simultaneously against binary assertions.
+4. **Spoken Turn Audio Replay**: Instant audio playback of any historical interviewer utterance directly from the studio transcript, powered by Edge Neural synthesis.
+5. **Executive Spoken Audio Debrief**: A 3-sentence executive hiring committee debrief generated on the Evaluation page with 1-click audio playback, accompanied by Speech Cadence & Pacing telemetry cards.
+
 ---
 
 ## 🗂️ Project Structure
@@ -124,11 +142,13 @@ ai-mock-interview-system/
 │   ├── services/
 │   │   ├── blueprint_service.py     # PDF resume extraction & multi-LLM blueprint engine
 │   │   ├── ledger_service.py        # SQLite Turn Ledger & SHA-256 integrity hash
-│   │   └── evaluation_service.py    # Anti-phantom binary assertion evaluation engine
+│   │   ├── tts_service.py           # Edge Neural TTS (24kHz MP3, RAM cache, text normalizer)
+│   │   └── evaluation_service.py    # Multimodal code + speech assertion evaluation engine
 │   ├── tests/
-│   │   └── test_services_engine.py  # 29 Comprehensive unit & integration tests
-│   ├── agent.py                     # LiveKit Agents WebRTC voice worker
-│   ├── main.py                      # FastAPI REST application & token dispenser
+│   │   ├── test_services_engine.py  # Comprehensive unit, ledger, and anti-phantom tests
+│   │   └── test_api_endpoints.py    # E2E API tests (chat, tts, ledger, evaluation)
+│   ├── agent.py                     # LiveKit Agents WebRTC enterprise voice worker
+│   ├── main.py                      # FastAPI REST & real-time hybrid interview engine
 │   ├── run_server.py                # Standalone Web API runner (Render deployment)
 │   ├── requirements.txt             # Python dependencies
 │   └── README.md                    # Backend architecture documentation
@@ -136,29 +156,30 @@ ai-mock-interview-system/
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── AudioVisualizer.tsx  # Reactive WebRTC audio spectrum bars
-│   │   │   ├── ErrorBoundary.tsx    # Global crash protection with reload fallback
-│   │   │   ├── LatencyTelemetry.tsx # Live WebRTC TTFT & VAD latency telemetry
-│   │   │   ├── Layout.tsx           # Navigation bar & theme controller
-│   │   │   └── PersonaSelector.tsx  # Interactive interviewer audition cards
+│   │   │   ├── AudioVisualizer.tsx      # Reactive Web Audio API spectrum bars
+│   │   │   ├── ErrorBoundary.tsx        # Global crash protection with reload fallback
+│   │   │   ├── LatencyTelemetry.tsx     # Live WebRTC & STT latency telemetry
+│   │   │   ├── LiveKitRoomWrapper.tsx   # Hybrid Voice Studio Chamber with WPM HUD & scratchpad
+│   │   │   ├── Layout.tsx               # Navigation bar & theme controller
+│   │   │   └── PersonaSelector.tsx      # Interactive interviewer audition cards
 │   │   ├── pages/
-│   │   │   ├── Landing.tsx          # Gateway portal with guest fast-pass
-│   │   │   ├── Login.tsx            # Google OAuth & guest login
-│   │   │   ├── Intake.tsx           # Resume upload & blueprint customizer
-│   │   │   ├── Interview.tsx        # Focused LiveKit voice sound studio
-│   │   │   ├── Evaluation.tsx       # Hiring Committee Dossier & radar analysis
-│   │   │   └── History.tsx          # Historical session archive & audit logs
-│   │   ├── context/                 # AuthContext, ThemeContext, InterviewContext
-│   │   ├── lib/api.ts               # Typed REST client with error handling
-│   │   └── index.css                # Obsidian/Zinc design system (Vanilla CSS)
-│   ├── package.json                 # Frontend dependencies
-│   └── README.md                    # Frontend architecture documentation
+│   │   │   ├── Landing.tsx              # Gateway portal with guest fast-pass
+│   │   │   ├── Login.tsx                # Google OAuth & guest login
+│   │   │   ├── Intake.tsx               # Resume upload & blueprint customizer
+│   │   │   ├── Interview.tsx            # Focused hybrid voice sound studio
+│   │   │   ├── Evaluation.tsx           # Hiring Committee Dossier, radar & spoken debrief
+│   │   │   └── History.tsx              # Historical session archive & audit logs
+│   │   ├── context/                     # AuthContext, ThemeContext, InterviewContext
+│   │   ├── lib/api.ts                   # Typed REST client with error handling
+│   │   └── index.css                    # Obsidian/Zinc design system (Vanilla CSS)
+│   ├── package.json                     # Frontend dependencies
+│   └── README.md                        # Frontend architecture documentation
 │
-├── run_agent.bat                    # 1-Click local LiveKit voice agent launcher
-├── ARCHITECTURE.md                  # Deep-dive systems architecture & latency budget
-├── CONTRIBUTING.md                  # Open source contribution guidelines
-├── LICENSE                          # MIT License
-└── README.md                        # This primary documentation
+├── run_agent.bat                        # 1-Click local LiveKit voice agent launcher
+├── ARCHITECTURE.md                      # Deep-dive systems architecture & latency budget
+├── CONTRIBUTING.md                      # Open source contribution guidelines
+├── LICENSE                              # MIT License
+└── README.md                            # This primary documentation
 ```
 
 ---
@@ -169,12 +190,14 @@ ai-mock-interview-system/
 | :--- | :--- | :--- |
 | **Frontend SPA** | React 18 · TypeScript · Vite 6 | Zero-lag SPA, strict type safety, fast HMR |
 | **Styling** | Vanilla CSS (Obsidian / Zinc) | Zero framework overhead, custom audio visualizer, dark mode |
-| **Voice & WebRTC** | LiveKit Cloud · LiveKit Agents | Full-duplex WebRTC audio, Silero VAD, barge-in detection |
+| **Primary Voice Engine** | Chrome Web Speech API + Web Audio API | Zero-hop `en-IN` STT, continuous/interim recognition, Spacebar barge-in |
+| **Neural TTS Service** | Microsoft Edge Neural TTS (`edge-tts`) | 24kHz MP3, Indian-English female (`en-IN-NeerjaNeural`), RAM LRU caching |
+| **WebRTC Telephony Sidecar** | LiveKit Cloud · LiveKit Agents | Full-duplex WebRTC audio, Silero VAD, headless telephony gateway |
 | **Backend API** | FastAPI · Uvicorn · Python 3.10+ | Async REST endpoints, sub-100MB RAM footprint on Render |
 | **LLM Reasoning** | Groq (`qwen/qwen3.8-27b`, `llama-3.3-70b`) | Sub-400ms TTFT, multi-tier JSON-mode model fallback |
-| **Turn Ledger** | SQLite 3 (WAL mode) | Append-only turn tracking, SHA-256 cryptographic audit digest |
+| **Turn Ledger** | SQLite 3 (WAL mode) | Append-only turns, turn_type, code snippets, WPM, fillers, SHA-256 digest |
 | **Resume Extraction** | `pypdf` | Fast, deterministic text extraction from candidate PDF resumes |
-| **Testing** | Python `unittest` | 29 passing automated unit, API, and anti-phantom tests |
+| **Testing** | Python `unittest` | 31 passing automated unit, API, anti-phantom, and TTS tests |
 
 ---
 
@@ -290,20 +313,23 @@ python -m unittest discover backend/tests -v
 ```text
 test_anti_phantom_unreached_questions (backend.tests.test_services_engine.TestEvaluationService) ... ok
 test_assertion_scoring_mechanics (backend.tests.test_services_engine.TestEvaluationService) ... ok
+test_multimodal_code_and_filler_telemetry (backend.tests.test_services_engine.TestEvaluationService) ... ok
+test_tts_synthesis_and_normalization (backend.tests.test_api_endpoints.TestTtsService) ... ok
+test_chat_socratic_clarification_flow (backend.tests.test_api_endpoints.TestInterviewFlow) ... ok
 test_e2e_interview_flow (backend.tests.test_services_engine.TestIntegrationFlow) ... ok
 test_sha256_hash_consistency (backend.tests.test_services_engine.TestLedgerService) ... ok
 test_blueprint_generation_google_staff (backend.tests.test_services_engine.TestBlueprintService) ... ok
 ...
-Ran 29 tests in 16.385s
+Ran 31 tests in 48.35s
 
-OK (29/29 passing)
+OK (31/31 passing)
 ```
 
 Frontend production bundle verification:
 ```bash
 cd frontend
 npm run build
-# Verified: 0 TypeScript errors, bundle minified and chunked cleanly.
+# Verified: 0 TypeScript errors, bundle minified and chunked cleanly in 2.33s.
 ```
 
 ---
@@ -313,14 +339,17 @@ npm run build
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
 | `GET` | `/health` / `/api/health` | Service health status and version identifier |
-| `GET` | `/api/personas` | Catalogue of calibrated interviewer personas |
+| `GET` | `/api/personas` | Catalogue of calibrated interviewer personas with voice IDs & pause tolerances |
 | `POST` | `/api/blueprint` | Synthesize blueprint from structured JSON (company, role, JD) |
 | `POST` | `/api/blueprint/upload` | Parse PDF resume and synthesize tailored blueprint |
 | `GET` | `/api/blueprint/{session_id}` | Retrieve active blueprint for a session |
-| `POST` | `/api/token` | Dispense authenticated LiveKit WebRTC access token |
+| `POST` | `/api/interview/start` | Initialize hybrid voice interview session, greet candidate & stream 24kHz MP3 |
+| `POST` | `/api/interview/chat` | Conversational turn: persona pacing, Socratic hints, scratchpad sync & audio URL |
+| `GET` | `/api/tts` | Stream 24kHz Edge Neural MP3 with RAM LRU caching & technical normalizer |
+| `POST` | `/api/token` | Dispense authenticated LiveKit WebRTC access token (enterprise sidecar) |
 | `POST` | `/api/ledger/turn` | Explicitly append spoken turn to SQLite Turn Ledger |
 | `GET` | `/api/ledger/{session_id}` | Retrieve all verified turns & SHA-256 session integrity digest |
-| `POST` | `/api/evaluate/{session_id}` | Generate Staff Hiring Committee Evidence Dossier |
+| `POST` | `/api/evaluate/{session_id}` | Generate Staff Hiring Committee Evidence Dossier with multimodal scoring |
 | `GET` | `/api/history` | List chronologically archived sessions |
 | `GET` | `/api/history/{session_id}` | Retrieve complete session history, blueprint, and evaluation report |
 | `DELETE` | `/api/history/{session_id}` | Delete session and associated turns from archive |

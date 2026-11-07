@@ -42,7 +42,7 @@ cd backend
 source venv/bin/activate    # or venv\Scripts\activate on Windows
 python -m unittest discover tests -v
 ```
-*All 29 tests must pass (`OK`).*
+*All 31 tests must pass (`OK`).*
 
 ### Frontend Build & Lint:
 ```bash
@@ -57,11 +57,12 @@ npm run build
 ## 📝 Commit Message Guidelines
 
 We adhere to the [Conventional Commits](https://www.conventionalcommits.org/) specification:
-- `feat(blueprint): add support for custom startup interview tracks`
-- `fix(interview): fix React hook order in Interview and add global ErrorBoundary`
-- `perf(vad): reduce trailing silence boundary from 300ms to 200ms`
-- `docs(readme): expand API reference and quickstart commands`
-- `test(ledger): add SHA-256 session integrity digest verification test`
+- `feat(voice): implement hybrid Chrome Web Speech STT and Edge Neural TTS loop`
+- `feat(studio): add live WPM cadence HUD, Socratic hint flow, and scratchpad sync`
+- `feat(eval): add multimodal code assertion grading and executive spoken debrief`
+- `fix(ledger): extend SQLite schema with turn_type, code_snippet, wpm, and filler_count`
+- `docs(readme): update system architecture and API reference for hybrid engine`
+- `test(tts): verify 24kHz MP3 audio generation and spoken text normalizer`
 
 ---
 
